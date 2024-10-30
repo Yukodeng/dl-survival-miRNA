@@ -171,9 +171,9 @@ sd.genes.weak = apply(xtrue.weak.log, 1, sd)
 #####Note: first log transform stdev's to shrink range (per Andriy)
 beta0.weak=rep(c(1,-1),p/2)*round(1/sd.genes.weak/3, 1)
 beta0.weak
+# write.csv(beta0.weak, file.path("data","beta0.weak.csv"), quote = F)
 sum(abs(beta0.weak))
 sum(abs(beta0.moderate))
-
 
 h0=66
 t0=-log(runif(n_train)) *h0 / exp(t(xtrue.weak.log)%*%beta0.weak)
