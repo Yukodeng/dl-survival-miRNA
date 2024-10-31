@@ -2,10 +2,12 @@ import os
 from datetime import date
 import time
 from abc import ABC, abstractmethod
+
+from sklearn import BaseEstimator
 from .utils import *
 
 
-class DLSurvModels(ABC):
+class DLSurvModels(BaseEstimator):
     def __init__(self, subset, epochs, train_df, test_df, dataName, hyperparams=None):
         """
         This class implements and trains DL/ML survival models with
@@ -140,6 +142,7 @@ class DeepSurvKModel(DLSurvModels):
             
     def run_deepsurvModel(self, 
                         params,
+                        batch_size=None,
                         nan_stopping=True,
                         early_stopping=True,
                         save_model=True,
@@ -194,7 +197,7 @@ class DeepSurvKModel(DLSurvModels):
             ################ Train model #################
             start = time.time() # Record iteration start time
             history_dict[str(n)] = dsk.fit(x_train, y_train, 
-                            batch_size=n_patients_train,
+                            batch_size=batch_size,
                             epochs=epoch, 
                             callbacks=callbacks,
                             shuffle=False)
@@ -224,3 +227,4 @@ class DeepSurvKModel(DLSurvModels):
             'test score': test_scores}
             )   
         return history_dict, dsk_dict, model_results
+    

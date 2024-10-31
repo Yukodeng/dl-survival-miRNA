@@ -4,7 +4,8 @@ from sklearn.base import BaseEstimator
 import torchtuples as tt
 
 
-class DeepSURVSklearnAdapter(BaseEstimator):
+    
+class PyCoxDeepSurv(BaseEstimator):
     def __init__(
         self,
         learning_rate=1e-4,
@@ -20,7 +21,13 @@ class DeepSURVSklearnAdapter(BaseEstimator):
         self.num_nodes = num_nodes
         self.batch_size = batch_size
         self.epochs = epochs
-
+        
+    def build_model(self):
+        self.modelString = 'pycox'
+        if self.hyperparams is None:
+            self.hyperparams = {}
+            
+            
     def fit(self, X, y):
         self.net_ = tt.practical.MLPVanilla(
             X.shape[1],

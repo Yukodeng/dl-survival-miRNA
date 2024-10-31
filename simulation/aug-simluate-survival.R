@@ -33,7 +33,8 @@ workingt=workingt[keep,]
 tc=rowSums(workingt)
 mid.tc=(tc>median(tc) & tc<quantile(tc, 0.75)) # select genes with total count in the third quartile
 cv=apply(workingt, 1, sd)/rowMeans(workingt)
-mid.cv=(cv>median(cv)) # select genes with coefficient of variation (SD/mean) in the upper half
+# mid.cv=(cv>median(cv)) # select genes with coefficient of variation (SD/mean) in the upper half
+mid.cv = (cv>quantile(cv, 0.75))
 geneid=row.names(workingt)
 candidate.geneid=geneid[mid.tc & mid.cv]
 
@@ -53,13 +54,8 @@ beta0.scaled = beta0 = as.matrix(read.csv("data/beta0.csv", row.names = 'X'))
 # beta0[,1] = c(2.4, -2.6, 2.0, -2.3, 5.0, -2.3, 1.8, -4.3, 3.1, -1.9)
 
 
-# Simulate survival outcome -----
 
-# Log-transform gene expression
-xtrue = workingt
-xtrue.log = log2(xtrue+0.5)
-n_train = ncol(xtrue)
-View(xtrue.log)
+# Simulate survival outcome -----
 
 set.seed(seed) # for reproducible results
 p = 10
@@ -69,11 +65,21 @@ if (p<=length(candidate.geneid)) {
   selected.geneid = candidate.geneid
 }
 selected.geneid
-# "hsa.miR.301a..1"     "hsa.miR.525.5p.1"    "hsa.miR.190b..1" 
-# "hsa.miR.892a.1"      "hsa.miR.129.5p.2..1" "hsa.miR.124.3..1"   
-#  "hsa.miR.329..2..1"   "hsa.miR.137.1"       "hsa.miR.1185.2.3p.1" "hsa.miR.599.1"    
+# "hsa.miR.301a..1"     "hsa.miR.525.5p.1"    "hsa.miR.190b..1"     "hsa.miR.892a.1"     
+# "hsa.miR.129.5p.2..1" "hsa.miR.124.3..1"    "hsa.miR.329..2..1"   "hsa.miR.137.1"      
+# "hsa.miR.1185.2.3p.1" "hsa.miR.599.1"  
+# # New criteria:
+# [1] "hsa.miR.3140.3p.1" "hsa.miR.934.1"     "hsa.miR.200b..1"   "hsa.miR.1293.3p.1"
+# [5] "hsa.miR.1258.3p.1" "hsa.miR.370.1"     "hsa.miR.138.2..3"  "hsa.miR.124.3..1" 
+# [9] "hsa.miR.659..1"    "hsa.miR.135b..1" 
 
-#### Simsurv pacakge 
+## Log-transform gene expression
+xtrue = workingt[selected.geneid,]
+xtrue.log = log2(xtrue+0.5)
+n_train = ncol(xtrue)
+
+
+### TO COLLAPSE: Simsurv pacakge ----
 # install.packages('simsurv');library(simsurv)
 # # Example
 # x=data.frame(t(xtrue.log))
@@ -123,8 +129,7 @@ dataType = 'linear'
 
 ### Exponential: moderate =====
 ## Calculate beta's 
-xtrue.mod.log = xtrue.log[selected.geneid,]
-sd.genes = apply(xtrue.mod.log, 1, sd)
+sd.genes = apply(xtrue.log, 1, sd)
 sd.genes
 
 beta0.moderate=rep(c(1,-1),p/2)*round(1/sd.genes, 1)
@@ -192,51 +197,17 @@ file.name = "simSurvival_exponential_weak_10000_latest_RW.scale.csv"
 ## Nonlinear simulation -----
 dataType='nonlinear'
 
-#### non-linear term 1: -----
-method="nl-1"
-n.interact = 1
-set.seed(seed) # randomly select a interaction gene
-interact.gene = sample(selected.geneid, n.interact)# "hsa.miR.887.1"
-
-interact.col = (scale(xtrue.log[interact.gene,]))^2
-# hist(interact.col)
-# summary(interact.col)
-interact.beta=round(1/sd(interact.col), 1)
-# interact.beta
-
-xtrue.nl1.log = rbind(xtrue.log, t(interact.col))
-beta0.nl1 = c(beta0.scaled, interact.beta)
-
-h0=.7e-2
-t0=-log(runif(n_train))*h0*exp(t(xtrue.nl1.log)%*%beta0.nl1)
-hist(t0[t0<200])
-ct=runif(n_train, 0, 200) ## generate censoring time from unif(0,200)
-t=ifelse(t0<=ct, t0, ct)
-delta=1*(t0<=ct)  ## about 75% event rate
-ncase.train=sum(delta)
-ncase.train / n_train ## event rate
-summary(t) ## simulated survival time
-
-
 #### non-linear 10 terms -----
 method = "nl-quadratic"
-# n.interact = 1
-# set.seed(seed) # randomly select a interaction gene
-# interact.gene = sample(selected.geneid, n.interact) #"hsa.miR.887.1"
 
 ## Scale gene expr data
-gene.val.scaled = apply(xtrue.log[selected.geneid,], 1, scale)
-interact.col = t(gene.val.scaled^2)
-# interact.col = as.matrix(gene.val.scaled)*as.vector(scale(xtrue.log[interact.gene,],
-#                                                              center=F))
-View(interact.col)
+xtrue.log.scaled = t(apply(xtrue.log, 1, scale))
+xtrue.nl2.log = as.matrix(xtrue.log.scaled)^2
+View(xtrue.nl2.log)
 
-sd.interact = apply(interact.col, 1, sd)
-interact.beta= rep(c(1,-1),5)*round(1/sd.interact, 1)
-interact.beta
-
-xtrue.nl2.log = interact.col
-beta0.nl2 = interact.beta
+sd.genes = apply(xtrue.nl2.log, 1, sd)
+beta0.nl2= rep(c(1,-1),5)*round(5/sd.genes, 1)
+beta0.nl2
 
 h0=40
 t0=-log(runif(n_train)) * h0*exp(t(interact.col)%*%interact.beta)
@@ -249,16 +220,47 @@ print(paste0("Event rate: ", ncase.train / n_train))
 summary(t)## simulated survival time 
 file.name = "simSurvival_nl-quadratic_10000_latest_RW.scale.csv"
 
+
+#### 10 non-linear terms: -----
+method="nl-interaction"
+
+# scale gene expression data
+xtrue.log.scaled = t(apply(xtrue.log, 1, scale))
+
+n.interact = 1
+set.seed(seed) # randomly select a interaction gene
+interact.gene = sample(selected.geneid, n.interact) #"hsa.miR.135b..1"
+interact.gene.val = xtrue.log.scaled[interact.gene,]
+
+xtrue.nl1.log = as.matrix(xtrue.log.scaled) %*% diag(interact.gene.val)
+View(xtrue.nl1.log)
+sd.interact = apply(xtrue.nl1.log, 1, sd)
+# sd.interact
+beta0.nl1 = rep(c(1,-1),5)*round(3/sd.interact, 1) 
+beta0.nl1
+
+
+h0=.7e-2
+t0=-log(runif(n_train))*h0*exp(t(xtrue.nl1.log)%*%beta0.nl1)
+hist(t0[t0<200])
+ct=runif(n_train, 0, 200) ## generate censoring time from unif(0,200)
+t=ifelse(t0<=ct, t0, ct)
+delta=1*(t0<=ct)  ## about 75% event rate
+ncase.train=sum(delta)
+ncase.train / n_train ## event rate
+summary(t) ## simulated survival time
+
+
 #### non-linear 10 sine terms -----
 method='nl-sine'
-set.seed(seed)
+# set.seed(seed)
 # err = matrix(rnorm(nrow(xtrue)*ncol(xtrue), 0, 0.25), ncol=nrow(xtrue)) 
-interact.col = t(sin(t(xtrue.log[selected.geneid,]))) # add randomness to sine simulation
-plot(xtrue.log["hsa.miR.301a..1",], interact.col["hsa.miR.301a..1",])
+interact.col = t(sin(t(xtrue.log)))
 View(interact.col)
+plot(xtrue.log["hsa.miR.1293.3p.1",], interact.col["hsa.miR.1293.3p.1",])
 
 sd.interact = apply(interact.col, 1, sd)
-interact.beta= rep(c(1,-1),5)*round(1/sd.interact/6, 2)
+interact.beta= rep(c(1,-1),5)*round(1/sd.interact/3, 2)
 interact.beta
 
 xtrue.nl3.log = interact.col
@@ -370,9 +372,10 @@ simulate_T <- function(h0, h.log, n_train, max.censor.time) {
 
 
 sim.survdata <- function(surv.data, sim.dataType, sim.method, is_log_scale=T, 
-                         cap.gene.value=3350000, h0=150, max.censor.time=200, 
-                         beta0=NULL, simulate_beta=F, p=NULL, save_beta_dir=NULL,
-                         plot_km=T, save_data=T, file.name=NULL, seed=1234) {
+                         cap.gene.value=3350000, h0=50, max.censor.time=200, 
+                         beta0=NULL, simulate_beta=T, p=10, p.weak=30,
+                         plot_km=T, save_data=T, file.name=NULL, save_beta=T,
+                         seed=1234) {
   
   ## Prepare gene expression data -------------------------
   if (is_log_scale){
@@ -395,10 +398,11 @@ sim.survdata <- function(surv.data, sim.dataType, sim.method, is_log_scale=T,
     tc=rowSums(workingt)
     mid.tc=(tc>median(tc) & tc<quantile(tc, 0.75)) # select genes with total count in the third quartile
     cv=apply(workingt, 1, sd)/rowMeans(workingt)
-    mid.cv=(cv>median(cv)) # select genes with coefficient of variation (SD/mean) in the upper half
+    mid.cv=(cv > quantile(cv, 0.75)) # select genes with coefficient of variation (SD/mean) in the upper half
     geneid=row.names(workingt)
     candidate.geneid=geneid[mid.tc & mid.cv]
     
+    # Select p (defualt=10) true genes
     set.seed(seed) # for reproducible results
     if (p<=length(candidate.geneid)) 
     {
@@ -407,118 +411,134 @@ sim.survdata <- function(surv.data, sim.dataType, sim.method, is_log_scale=T,
     {
       selected.geneid = candidate.geneid
     }
-    
-    ## Calculate beta's 
-    selected.gene.cpm=cpm[selected.geneid,]
-    sd.genes.cpm = apply(log2(selected.gene.cpm+0.5), 1, sd)
-    
-    ## Scale stdev of gene expression by constant c to obtain beta 0's
-    #####Note: Maybe first log transform stdev's to shrink range (per Andriy)
-    beta0=rep(c(1,-1),p/2)*round(1/sd.genes.cpm, 1)
-    
-    if (!is.null(save_beta_dir))
-    {
-      write.csv(data.frame(beta0),
-                file.path('data', sim.dataType, paste0("beta0_",sim.method,"_", date,".csv")) )
-    }
+  }
+  
+  ### Alternatively import true gene and beta0 coefficients ----
+  else {
+    selected.geneid = rownames(beta0)
   }
   
   
-  ## Simulate survival outcome -----------------------
+  ## Simulate survival outcome ---------------------------
   
-  # Log-transform gene expression
-  selected.geneid = rownames(beta0)
+  # log-transform selected true genes
   xtrue = workingt[selected.geneid,]
   xtrue.log = log2(xtrue+0.5)
   n_train = ncol(xtrue)
   
-  ### Linear Simulation ----------------
-  if (sim.dataType == 'linear') {
-    
-    if (sim.method=='exponential') 
-    {
-      print("Simulating from exponential distribution")
+  
+  ### Linear Simulation ------------------
+  if (sim.dataType == 'linear') 
+  {
+    #### Moderate signals -------
+    if (sim.method=='moderate') {
+      
+      print("Simulating from linear risk function with moderate signals")
+      
+      ## calculate beta's as inverse std of gene expression
+      sd.genes = apply(xtrue.log, 1, sd)
+      beta0 = rep(c(1,-1),p/2) * round(1/sd.genes, 1)
+      
+      ## calculate log risk
       h.log= t(xtrue.log) %*% beta0 
-      surv.out=simulate_T(h0, h.log, n_train, max.censor.time)
     }
+    
+    ### Weak Signals ------------
+    else if (sim.method=='weak') {
+      
+      print("Simulating from linear risk function with weak signals")
+      
+      ## re-select (default=30) true genes associated with survival time
+      set.seed(seed)
+      if (p.weak <= length(candidate.geneid)) {
+        selected.weak.geneid = sample(candidate.geneid, p.weak, replace=F)
+      } else {
+        selected.weak.geneid = candidate.geneid
+      }
+      
+      # Log-transform gene expression
+      xtrue.weak = workingt[selected.weak.geneid,]
+      xtrue.weak.log = log2(xtrue.weak+0.5)
+      
+      # Simulate beta values
+      sd.genes.weak = apply(xtrue.weak.log, 1, sd)
+      #### Note: shrink beta coefficients to conrol for total signal
+      beta.scale = p/p.weak
+      beta0 = rep(c(1,-1),p/2) * round(1/sd.genes.weak*beta.scale, 1)
+      
+      ## calculate log risk
+      h.log= t(xtrue.weak.log) %*% beta0
+    }
+    
+    surv.out=simulate_T(h0, h.log, n_train, max.censor.time)
   }
-  ### Nonlinear Simulation -------------
+  
+  
+  ### Nonlinear Simulation ----------------
   else if (sim.dataType=='nonlinear') {
     
-    #### 1 quadratic term -------
-    if (sim.method=='nl-1') 
-    {
-      print("Simulating with 1 quadratic interaction terms")
+    #### 10 quadratic terms --------
+    if (sim.method=='nl-quadratic') {
       
-      set.seed(seed) # randomly select a interaction gene
-      interact.gene = sample(selected.geneid, 1)
-      print(paste0("Interaction term selected: ", interact.gene))# "hsa.miR.887.1"
+      print("Simulating with quadratic transformation")
       
-      interact.col = (xtrue[interact.gene,])^2
-      interact.col[interact.col>cap.gene.value] = cap.gene.value + 
-        rnorm(sum(interact.col>cap.gene.value),0,1e3)
-      interact.cpm = cpm(interact.col)
-      sd.interact.cpm = sd(log2(interact.cpm+0.5))
-      interact.beta = round(1/sd.interact.cpm, 1)
+      ## Scale gene expr data
+      xtrue.log.scaled = t(apply(xtrue.log, 1, scale))
+      xtrue.nl.log = as.matrix(xtrue.log.scaled)^2
       
-      xtrue.nl = rbind(xtrue, t(interact.col))
-      xtrue.nl.log = log2(xtrue.nl+0.5)
-      beta0.nl = c(beta0, interact.beta)
+      sd.genes = apply(xtrue.nl.log, 1, sd)
+      beta0 = rep(c(1,-1),5)*round(5/sd.genes, 1)
       
-      h.log = t(xtrue.nl.log) %*% beta0.nl
+      h.log = t(xtrue.nl.log) %*% beta0
     }
     
-    ### 10 quadratic terms --------
-    else if (sim.method=='nl-quadratic')
-    {
-      print("Simulating with non-linear quadratic interaction terms")
+    
+    ### 10 quadratic interaction terms ------
+    else if (sim.method=='nl-interaction') {
+      
+      print("Simulating with non-linear interaction terms")
       
       set.seed(seed) # randomly select a interaction gene
       interact.gene = sample(selected.geneid, 1)
       print(paste0("Interaction term selected: ", interact.gene) )
       
-      interact.gene.vals = xtrue[interact.gene,]
-      int.beta = runif(length(selected.geneid)) # add randomness
-      interact.col = sqrt( t(xtrue) *int.beta * interact.gene.vals)
+      xtrue.log.scaled = t(apply(xtrue.log, 1, scale))
+      interact.gene.val = xtrue.log.scaled[interact.gene,]
       
-      interact.cpm=cpm(interact.col)
-      sd.interact.cpm = apply(log2(interact.cpm+0.5),2,sd)
-      interact.beta= rep(c(1,-1), length(selected.geneid)/2) * round(1/sd.interact.cpm, 1)
+      xtrue.nl.log = as.matrix(xtrue.log.scaled) %*% diag(interact.gene.val)
+      sd.genes = apply(xtrue.nl.log, 1, sd)
+      beta0 = rep(c(1,-1),5) * round(3/sd.genes, 1) 
       
-      xtrue.nl = rbind(xtrue, t(interact.col))
-      xtrue.nl.log = log2(xtrue.nl+0.5)
-      beta0.nl = c(beta0, interact.beta)
-      
-      h.log = t(xtrue.nl.log) %*% beta0.nl
+      h.log = t(xtrue.nl.log) %*% beta0
     }
     
+    
     ### 10 sine terms -----------
-    else if (sim.method=='nl-sine')
-    {
+    else if (sim.method=='nl-sine') {
+      
       print("Simulating with non-linear Sine interaction terms")
-      err = matrix(rnorm(nrow(xtrue)*ncol(xtrue), 0, 0.25), ncol=nrow(xtrue)) 
-      interact.col = sin(t(xtrue.log)) + err # add randomness to sine simulation
       
-      sd.interact = apply(interact.col ,2, sd)
-      interact.beta= rep(c(1,-1), length(selected.geneid)/2)  *round(1/sd.interact, 1)
+      xtrue.nl.log = t(sin(t(xtrue.log))) # sine transformation
       
-      xtrue.nl.log = rbind(xtrue.log, t(interact.col))
-      beta0.nl = c(beta0, interact.beta)
+      # calculate beta coefficients
+      sd.genes = apply(xtrue.nl.log, 1, sd)
+      beta0 = rep(c(1,-1),5)*round(1/sd.genes/2, 2)
       
-      h.log = t(xtrue.nl.log) %*% beta0.nl
+      # calculate log risk
+      h.log = t(xtrue.nl.log) %*% beta0
     }
     
     ### Gaussian log risk function -----
-    else if (sim.method=='nl-gauss') 
-    {
-      print("Simulating with non-linear Gaussian log-risk function")
-      xtrue.log.scaled = t(scale(t(xtrue.log)))
-      x.mean = apply(xtrue.log.scaled, 1, mean)
-      sigma  = 1.0
-      h.log  = apply(xtrue.log.scaled, 2,
-                     function(x) exp( -sum(abs(x-x.mean)^2) / (2*sigma^2) )
-      )
-    }
+    # else if (sim.method=='nl-gauss') 
+    # {
+    #   print("Simulating with non-linear Gaussian log-risk function")
+    #   xtrue.log.scaled = t(scale(t(xtrue.log)))
+    #   x.mean = apply(xtrue.log.scaled, 1, mean)
+    #   sigma  = 1.0
+    #   h.log  = apply(xtrue.log.scaled, 2,
+    #                  function(x) exp( -sum(abs(x-x.mean)^2) / (2*sigma^2) )
+    #   )
+    # }
     
     ## Save simulated survival time and censoring outcome
     surv.out = simulate_T(h0, h.log, n_train, max.censor.time)
@@ -538,12 +558,20 @@ sim.survdata <- function(surv.data, sim.dataType, sim.method, is_log_scale=T,
   if (save_data) {
     out.dir  = file.path('data', sim.dataType)
     dir.create(out.dir, showWarnings = F)
-    if (is.null(file.name)) 
-    {
+    if (is.null(file.name)) {
       file.name = file.path(paste0("simSurvival_",sim.method,"_",N*2,"_",date,".csv"))
     }
-    write.csv(out, file=file.path(out.dir, file.name), row.names=F) ## save simulated survival outcomes
+    ## save simulated survival outcomes
+    write.csv(out, file=file.path(out.dir, file.name), row.names=F)
+    
+    ## save beta0's
+    if (save_beta) {
+      write.csv(data.frame(beta0),
+                file.path(out.dir, paste0("beta0_",sim.method,"_", date,".csv")) )
+    }
   }
+  
+  
   
   ## K-M plot of simulated survival data -------
   if (plot_km) {
@@ -568,6 +596,7 @@ sim.survdata <- function(surv.data, sim.dataType, sim.method, is_log_scale=T,
   
   return(out)
 }
+
 
 
 # Run Simulation -------------
