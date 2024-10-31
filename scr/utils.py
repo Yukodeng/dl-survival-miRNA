@@ -8,8 +8,11 @@ from sklearn.model_selection import train_test_split
 def load_simulate_survival_data(file_path=None,
                                 folder='', 
                                 keywords=['10000'], 
-                                initial_split=False, test_size=0.2, random_state=42, 
-                                time_col='time',status_col='status',
+                                initial_split=True,
+                                test_size=0.2, 
+                                val_split=False, val_size=0.25, 
+                                random_state=42, 
+                                time_col='time', status_col='status',
                                 save_data=False):
     # prepare simulated survival data
     keywords = [keywords] if not isinstance(keywords, list) else keywords
@@ -24,7 +27,7 @@ def load_simulate_survival_data(file_path=None,
                     os.path.join(data_folder, file)).reset_index(drop=True)[[time_col,status_col]]
                 found = True       
         if not found:
-            raise FileExistsError("No data file found with given query keywords!")
+            raise FileExistsError("No data file found with the given query keywords")
     else:
         try:
             surv_df = pd.read_csv(file_path, index_col=0).reset_index(drop=True)
@@ -35,24 +38,28 @@ def load_simulate_survival_data(file_path=None,
     x_df = pd.read_csv(os.path.join("data", "simulate_survival_10000.csv")).reset_index(drop=True)
     data_df = pd.concat([x_df, surv_df], axis=1)
     
-    
-    if initial_split:
-        # FIRST TIME: split data into train (0.8) and test (0.2) set
-        data = np.asarray(data_df)
-        train_df, test_df = train_test_split(data, 
-                                            test_size=test_size, 
-                                            shuffle=True, random_state=random_state,
-                                            stratify=data_df[status_col])
-        pd.Series(train_df.index).to_csv(
-            os.path.join("data", "train_index.csv"), index=False)
-        pd.Series(test_df.index).to_csv(
-            os.path.join("data", "test_index.csv"), index=False)
+    # if initial_split:
+    # FIRST TIME: split data into train (0.8) and test (0.2) set
+    data = np.asarray(data_df)
+    train_df, test_df = train_test_split(data_df, 
+                                        test_size=test_size,
+                                        shuffle=True, random_state=random_state,
+                                        stratify=data_df[status_col])
+    if val_split:
+        train_df, val_df = train_test_split(train_df, 
+                                        test_size=val_size,
+                                        shuffle=True, random_state=random_state,
+                                        stratify=train_df[status_col])
+    # pd.Series(train_df.index).to_csv(
+    #     os.path.join("data", "train_index.csv"), index=False)
+    # pd.Series(test_df.index).to_csv(
+    #     os.path.join("data", "test_index.csv"), index=False)
         
-    train_ind = pd.read_csv(os.path.join('data', "train_index.csv")).iloc[:,0]
-    test_ind = pd.read_csv(os.path.join('data', "test_index.csv")).iloc[:,0]
-    
-    train_df = data_df.iloc[train_ind,:]
-    test_df = data_df.iloc[test_ind,:]
+    # # Directly read data splits
+    # train_ind = pd.read_csv(os.path.join('data', "train_index.csv")).iloc[:,0]
+    # test_ind = pd.read_csv(os.path.join('data', "test_index.csv")).iloc[:,0]
+    # train_df = data_df.iloc[train_ind,:]
+    # test_df = data_df.iloc[test_ind,:]
     
     if save_data:
         # Directly output train and test data
@@ -60,8 +67,13 @@ def load_simulate_survival_data(file_path=None,
             os.path.join("data", folder, "simulate_survival_train.csv"), index=False)
         test_df.to_csv(
             os.path.join("data", folder, "simulate_survival_test.csv"), index=False)
-        
-    return train_df, test_df
+        if val_split:
+            val_df.to_csv(
+                os.path.join("data", folder, "simulate_survival_val.csv"), index=False)
+    if val_split:
+        return train_df, val_df, test_df
+    else:
+        return train_df, test_df
 
 
 def load_simulate_results(dataFolderName, 
