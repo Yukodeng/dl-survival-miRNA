@@ -3,11 +3,10 @@ from datetime import date
 import time
 from abc import ABC, abstractmethod
 
-from sklearn import BaseEstimator
 from .utils import *
 
 
-class DLSurvModels(BaseEstimator):
+class DLSurvModels(ABC):
     def __init__(self, subset, epochs, train_df, test_df, dataName, hyperparams=None):
         """
         This class implements and trains DL/ML survival models with

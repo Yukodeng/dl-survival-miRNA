@@ -1,4 +1,4 @@
-from pycox import *
+from scr.pycox.models.cox import *
 from sklearn.base import BaseEstimator
 
 import torchtuples as tt
@@ -11,9 +11,9 @@ class PyCoxDeepSurv(BaseEstimator):
         learning_rate=1e-4,
         batch_norm=True,
         dropout=0.0,
-        num_nodes=[32, 32],
+        num_nodes=[32, 16],
         batch_size=128,
-        epochs=10,
+        epochs=50,
     ):
         self.learning_rate = learning_rate
         self.batch_norm = batch_norm
@@ -32,7 +32,7 @@ class PyCoxDeepSurv(BaseEstimator):
         self.net_ = tt.practical.MLPVanilla(
             X.shape[1],
             self.num_nodes,
-            1,
+            self.epochs,
             self.batch_norm,
             self.dropout,
             output_bias=True,

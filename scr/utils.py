@@ -45,21 +45,16 @@ def load_simulate_survival_data(file_path=None,
                                         test_size=test_size,
                                         shuffle=True, random_state=random_state,
                                         stratify=data_df[status_col])
+    train_df = train_df.reset_index(drop=True)
+    test_df  = test_df.reset_index(drop=True)
+
     if val_split:
         train_df, val_df = train_test_split(train_df, 
                                         test_size=val_size,
                                         shuffle=True, random_state=random_state,
                                         stratify=train_df[status_col])
-    # pd.Series(train_df.index).to_csv(
-    #     os.path.join("data", "train_index.csv"), index=False)
-    # pd.Series(test_df.index).to_csv(
-    #     os.path.join("data", "test_index.csv"), index=False)
-        
-    # # Directly read data splits
-    # train_ind = pd.read_csv(os.path.join('data', "train_index.csv")).iloc[:,0]
-    # test_ind = pd.read_csv(os.path.join('data', "test_index.csv")).iloc[:,0]
-    # train_df = data_df.iloc[train_ind,:]
-    # test_df = data_df.iloc[test_ind,:]
+        train_df = train_df.reset_index(drop=True)
+        val_df = val_df.reset_index(drop=True)
     
     if save_data:
         # Directly output train and test data

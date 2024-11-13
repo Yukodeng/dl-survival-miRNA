@@ -14,8 +14,6 @@ from sksurv.ensemble import RandomSurvivalForest, GradientBoostingSurvivalAnalys
 
 class SurvivalModelPipeline(ABC):
     def __init__(self, X_train, y_train, X_test, y_test, dataName=None, hyperparameters=None, random_state=42):
-        # self.train_data = train_data
-        # self.test_data = test_data
         self.X_train=X_train
         self.y_train=y_train
         self.X_test=X_test  
