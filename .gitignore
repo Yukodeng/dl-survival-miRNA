@@ -7,9 +7,9 @@ weight_checkpoint_*
 data/2024-08-08/
 data/2024-08-15/
 data/082924/
-models/
 simulate_survival*.csv
 MSKpair_*.csv
 !MSKpair_miRNA_names.csv
 !MSKpair_MXF_merge.csv
 !MSKpair_PMFH_merge.csv
+*.pkl
