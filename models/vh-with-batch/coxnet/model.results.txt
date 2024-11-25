@@ -1,0 +1,2 @@
+	n train	train time	train score	test score
+0	96	0.66	0.9949250845819236	0.8634606089898502

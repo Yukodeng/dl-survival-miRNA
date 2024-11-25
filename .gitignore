@@ -1,5 +1,4 @@
 DeepSurv/
-pycox-deepsurv/
 deepsurvTorch/
 archive/
 __pycache__/
@@ -7,6 +6,7 @@ weight_checkpoint_*
 data/2024-08-08/
 data/2024-08-15/
 data/082924/
+GDCdata/
 simulate_survival*.csv
 MSKpair_*.csv
 !MSKpair_miRNA_names.csv
