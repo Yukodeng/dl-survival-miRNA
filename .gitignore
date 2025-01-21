@@ -13,3 +13,4 @@ MSKpair_*.csv
 !MSKpair_MXF_merge.csv
 !MSKpair_PMFH_merge.csv
 *.pkl
+GDCdata/

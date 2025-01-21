@@ -7,7 +7,8 @@ from sklearn.model_selection import train_test_split
 
 def load_simulate_survival_data(file_path=None,
                                 folder='', 
-                                keywords=['10000'], 
+                                keywords=['latest'],
+                                N = 20000, 
                                 initial_split=True,
                                 test_size=0.2, 
                                 val_split=False, val_size=0.25, 
@@ -35,7 +36,7 @@ def load_simulate_survival_data(file_path=None,
             raise FileNotFoundError("Data path not found!")
     
     # load gene expression data and concat into 1 data frame
-    x_df = pd.read_csv(os.path.join("data", "simulate_survival_10000.csv")).reset_index(drop=True)
+    x_df = pd.read_csv(os.path.join("data", f"simulate_survival_{N}.csv")).reset_index(drop=True)
     data_df = pd.concat([x_df, surv_df], axis=1)
     
     # if initial_split:
@@ -141,6 +142,20 @@ def dataframe_to_deepsurv_ds(df,
         }
         
 
+def plot_simulation_data(train_df, test_df):
+    '''Function to plot simulated data.'''
+    # observe data
+    print("Event rate in train set: %f" % (sum(train_df['status']==1) / train_df.shape[0]))
+    print("Event rate in test set: %f" %  (sum(test_df['status']==1) / test_df.shape[0]))
+    print('Survival time distribution:')
+    _, ax = plt.subplots(figsize=(3,3))
+    ax.hist(train_df['time'], label='train')
+    # ax.hist(val_df['time'],   label='val', alpha=.8)
+    ax.hist(test_df['time'], label='test', alpha=0.6)
+    ax.legend(fontsize=12)
+    plt.show()
+    
+    
 def dataframe_to_scikitsurv_ds(df, time_col='time', status_col='status'):
     """Convert input data (pandas DataFrame) to scikit-survival 
     compatible format for model training.
