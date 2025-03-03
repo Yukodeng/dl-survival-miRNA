@@ -7,10 +7,10 @@ from sklearn.model_selection import train_test_split
 
 def load_simulate_survival_data(file_path=None,
                                 folder='', 
-                                keywords=['latest'],
+                                keywords=[''],
                                 N = 20000, 
-                                initial_split=True,
-                                test_size=0.2, 
+                                # initial_split=True,
+                                test_size=0.1, 
                                 val_split=False, val_size=0.25, 
                                 random_state=42, 
                                 time_col='time', status_col='status',
@@ -40,7 +40,7 @@ def load_simulate_survival_data(file_path=None,
     data_df = pd.concat([x_df, surv_df], axis=1)
     
     # if initial_split:
-    # FIRST TIME: split data into train (0.8) and test (0.2) set
+    # FIRST TIME: split data into train and test set
     data = np.asarray(data_df)
     train_df, test_df = train_test_split(data_df, 
                                         test_size=test_size,
@@ -72,22 +72,27 @@ def load_simulate_survival_data(file_path=None,
         return train_df, test_df
 
 
+############## summary functions ###############
+modelname_dict = {'coxnet':'CoxPH',
+                'svm': 'SSVM',
+                'rsf': 'RSF',
+                'deepsurv-torch': "DeepSurv"}
+
 def load_simulate_results(dataFolderName, 
-                        subset=[50, 200, 500, 1000, 2000, 5000, 8000],
-                        modelnames=['coxnet','rsf','gb','deepsurvk']):
+                        modelnames=['coxnet','svm','rsf','deepsurv-torch'],
+                        fileName = 'model.results.10runs.txt'):
     
-    results = pd.DataFrame({'n train': subset})
+    results = pd.DataFrame({'n train': []})
     for mdl in modelnames:
-        file_dir = os.path.join('models', dataFolderName, mdl, 'model.results.txt')
+        file_dir = os.path.join('models', dataFolderName, mdl, fileName)
         try:
             result_df = pd.read_table(file_dir, index_col=0)
         except:
-            continue
-        result_df.columns = ["_".join((col, mdl)) if col!='n train' else col for col in result_df.columns.tolist() ]
-        results = results.merge(result_df, on='n train', how='outer')# right_on=result_df.columns[0])
+            result_df = pd.read_table(os.path.join('models', dataFolderName, mdl, 'model.results.txt'), index_col=0)
+        result_df['model'] = modelname_dict[mdl]
+        results = pd.concat([results, result_df], axis=0)
 
     return results
-
 
 ############# DeepSurv Utility Functions ############
 
