@@ -1,11 +1,26 @@
+# folders
 DeepSurv/
-pycox-deepsurv/
+deepsurvTorch/
 archive/
 __pycache__/
+
+# saved models
+weight_checkpoint_*
+.db
+*.pkl
+
+# scripts
+*.sh
+
+# data
 data/2024-08-08/
 data/2024-08-15/
 data/082924/
-models/
+GDCdata/
+# *maf_generated.csv
+simulation/batch_effect/results/
+!simulation/batch_effect/results/organized/
+data/with_without_batch_maf/
 simulate_survival*.csv
 MSKpair_*.csv
 !MSKpair_miRNA_names.csv

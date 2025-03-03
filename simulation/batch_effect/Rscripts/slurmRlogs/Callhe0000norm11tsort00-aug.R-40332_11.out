@@ -1,0 +1,88 @@
+Loading required package: Matrix
+Loaded glmnet 4.1-8
+Loading required package: mgcv
+Loading required package: nlme
+This is mgcv 1.9-1. For overview type 'help("mgcv-package")'.
+Loading required package: genefilter
+Loading required package: BiocParallel
+
+Attaching package: ‘MASS’
+
+The following object is masked from ‘package:genefilter’:
+
+    area
+
+Loading required package: limma
+Loading required package: R.oo
+Loading required package: R.methodsS3
+R.methodsS3 v1.8.2 (2022-06-13 22:00:14 UTC) successfully loaded. See ?R.methodsS3 for help.
+R.oo v1.27.0 (2024-11-01 18:00:02 UTC) successfully loaded. See ?R.oo for help.
+
+Attaching package: ‘R.oo’
+
+The following object is masked from ‘package:R.methodsS3’:
+
+    throw
+
+The following objects are masked from ‘package:methods’:
+
+    getClasses, getMethods
+
+The following objects are masked from ‘package:base’:
+
+    attach, detach, load, save
+
+R.utils v2.12.3 (2023-11-18 01:00:02 UTC) successfully loaded. See ?R.utils for help.
+
+Attaching package: ‘R.utils’
+
+The following object is masked from ‘package:utils’:
+
+    timestamp
+
+The following objects are masked from ‘package:base’:
+
+    cat, commandArgs, getOption, isOpen, nullfile, parse, use, warnings
+
+Error. Skipping.
+he0000bs20norm11tsort00-aug-seed-11[1] "iter=200"
+Error. Skipping.
+[1] "iter=201"
+Error. Skipping.
+[1] "iter=202"
+Error. Skipping.
+[1] "iter=203"
+Error. Skipping.
+[1] "iter=204"
+Error. Skipping.
+[1] "iter=205"
+Error. Skipping.
+[1] "iter=206"
+Error. Skipping.
+[1] "iter=207"
+Error. Skipping.
+[1] "iter=208"
+Error. Skipping.
+[1] "iter=209"
+Error. Skipping.
+[1] "iter=210"
+Error. Skipping.
+[1] "iter=211"
+Error. Skipping.
+[1] "iter=212"
+Error. Skipping.
+[1] "iter=213"
+Error. Skipping.
+[1] "iter=214"
+Error. Skipping.
+[1] "iter=215"
+Error. Skipping.
+[1] "iter=216"
+Error. Skipping.
+[1] "iter=217"
+Error. Skipping.
+[1] "iter=218"
+Error. Skipping.
+[1] "iter=219"
+ done 
+There were 21 warnings (use warnings() to see them)

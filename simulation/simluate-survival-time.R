@@ -1,22 +1,23 @@
 library(ggsurvfit)
 library(survival)
+library(edgeR)
 setwd("~/dl-survival-miRNA/")
 
 
 # Load simulated miRNA -----
 ## Parameters ----
-N = 5000
+N = 10000
 p = 10
 date = format(Sys.Date(), "%m%d%y")
 seed = 1234
 
 ########(subset N=5000 each) (log2+1 transformed)
-mxf = read.csv(file.path('data',"MSKpair_MXF_5000.csv"))[1:N,1:1033]
-pmfh = read.csv(file.path('data',"MSKpair_PMFH_5000.csv"))[1:N,1:1033]
+mxf = read.csv(file.path('data',"MSKpair_MXF_10000.csv"))[1:N,1:1033]
+pmfh = read.csv(file.path('data',"MSKpair_PMFH_10000.csv"))[1:N,1:1033]
 g.names = read.csv("data/MSKpair_miRNA_names.csv")$mirna.names[1:1033] ## gene names
 working=rbind(mxf, pmfh)
 colnames(working)=g.names
-# write.csv(working, "data/simulate_survival_10000.csv", row.names=F)
+# write.csv(working, "data/simulate_survival_20000.csv", row.names=F)
 
 
 # Function for quick simulation -----------
@@ -58,7 +59,7 @@ sim.survdata <- function(surv.data, sim.dataType, sim.method, is_log_scale=T,
   if (simulate_beta) {
     ## Filter genes by count per million
     cpm=cpm(workingt)
-    keep=(rowSums(cpm>2)>=5)
+    keep=(rowSums(cpm>2)>=10) # adjustable
     workingt=workingt[keep,]
     
     ## Select p true genes associated with survival time
@@ -271,8 +272,8 @@ sim.survdata <- function(surv.data, sim.dataType, sim.method, is_log_scale=T,
 # Linear risk with moderate effects
 linear.moderate.out = sim.survdata(surv.data=working, 
                           sim.dataType='linear', sim.method='moderate',
-                          h0=39, save_data = T, save_beta = T, seed=1234,
-                          file.name=paste0("simSurvival_linear-moderate_10000_latest_RW.scale.csv"))
+                          h0=35, save_data = T, save_beta = T, seed=123,
+                          file.name=paste0("simSurvival_linear-moderate_20000_latest_RW.scale.csv"))
 linear.moderate.surv = linear.moderate.out[[1]]
 ## Look at the distribution of simulated data
 plot(survfit(Surv(linear.moderate.surv$time, linear.moderate.surv$status)~1))
@@ -281,32 +282,32 @@ plot(survfit(Surv(linear.moderate.surv$time, linear.moderate.surv$status)~1))
 # Linear risk with weak effects
 linear.weak.out = sim.survdata(surv.data=working, 
                        sim.dataType='linear', sim.method='weak',
-                       h0=40, save_data = T, save_beta = T, seed=1234,
-                       file.name=paste0("simSurvival_linear-weak_10000_latest_RW.scale.csv"))
+                       h0=50, save_data = T, save_beta = T, seed=123,
+                       file.name=paste0("simSurvival_linear-weak_20000_latest_RW.scale.csv"))
 linear.weak.surv = linear.weak.out[[1]]
 
 
 # Squared terms
 nl.qua.out = sim.survdata(surv.data = working,
                         sim.dataType='nonlinear', sim.method='nl-quadratic',
-                        h0=1.75, save_data = T, save_beta = T, seed = 1234,
-                        file.name=paste0("simSurvival_nl-quadratic_10000_latest_RW.scale.csv"))
+                        h0=28, save_data = T, save_beta = T, seed = 123,
+                        file.name=paste0("simSurvival_nl-quadratic_20000_latest_RW.scale.csv"))
 nl.qua.surv=nl.qua.out[[1]]
 
 
 # Quadratic interaction
 nl.interact.out = sim.survdata(surv.data=working, 
                         sim.dataType='nonlinear', sim.method='nl-interaction',
-                        h0=49, save_data = T, save_beta = T, seed = 1234,
-                        file.name=paste0("simSurvival_nl-interaction_10000_latest_RW.scale.csv"))
+                        h0=38, save_data = T, save_beta = T, seed = 123,
+                        file.name=paste0("simSurvival_nl-interaction_20000_latest_RW.scale.csv"))
 nl.interact.surv = nl.interact.out[[1]]
 
 
 # Sine interaction
 nl.sine.out = sim.survdata(surv.data=working,
                           sim.dataType='nonlinear', sim.method='nl-sine',
-                          h0=8.75, save_data = T, save_beta = T, seed = 1234,
-                          file.name=paste0("simSurvival_nl-sine_10000_latest_RW.scale.csv"))
+                          h0=6, save_data = T, save_beta = T, seed = 123,
+                          file.name=paste0("simSurvival_nl-sine_20000_latest_RW.scale.csv"))
 nl.sine.surv = nl.sine.out[[1]]
 
 

@@ -7,9 +7,10 @@ from sklearn.model_selection import train_test_split
 
 def load_simulate_survival_data(file_path=None,
                                 folder='', 
-                                keywords=['10000'], 
-                                initial_split=True,
-                                test_size=0.2, 
+                                keywords=[''],
+                                N = 20000, 
+                                # initial_split=True,
+                                test_size=0.1, 
                                 val_split=False, val_size=0.25, 
                                 random_state=42, 
                                 time_col='time', status_col='status',
@@ -35,31 +36,26 @@ def load_simulate_survival_data(file_path=None,
             raise FileNotFoundError("Data path not found!")
     
     # load gene expression data and concat into 1 data frame
-    x_df = pd.read_csv(os.path.join("data", "simulate_survival_10000.csv")).reset_index(drop=True)
+    x_df = pd.read_csv(os.path.join("data", f"simulate_survival_{N}.csv")).reset_index(drop=True)
     data_df = pd.concat([x_df, surv_df], axis=1)
     
     # if initial_split:
-    # FIRST TIME: split data into train (0.8) and test (0.2) set
+    # FIRST TIME: split data into train and test set
     data = np.asarray(data_df)
     train_df, test_df = train_test_split(data_df, 
                                         test_size=test_size,
                                         shuffle=True, random_state=random_state,
                                         stratify=data_df[status_col])
+    train_df = train_df.reset_index(drop=True)
+    test_df  = test_df.reset_index(drop=True)
+
     if val_split:
         train_df, val_df = train_test_split(train_df, 
                                         test_size=val_size,
                                         shuffle=True, random_state=random_state,
                                         stratify=train_df[status_col])
-    # pd.Series(train_df.index).to_csv(
-    #     os.path.join("data", "train_index.csv"), index=False)
-    # pd.Series(test_df.index).to_csv(
-    #     os.path.join("data", "test_index.csv"), index=False)
-        
-    # # Directly read data splits
-    # train_ind = pd.read_csv(os.path.join('data', "train_index.csv")).iloc[:,0]
-    # test_ind = pd.read_csv(os.path.join('data', "test_index.csv")).iloc[:,0]
-    # train_df = data_df.iloc[train_ind,:]
-    # test_df = data_df.iloc[test_ind,:]
+        train_df = train_df.reset_index(drop=True)
+        val_df = val_df.reset_index(drop=True)
     
     if save_data:
         # Directly output train and test data
@@ -76,22 +72,27 @@ def load_simulate_survival_data(file_path=None,
         return train_df, test_df
 
 
+############## summary functions ###############
+modelname_dict = {'coxnet':'CoxPH',
+                'svm': 'SSVM',
+                'rsf': 'RSF',
+                'deepsurv-torch': "DeepSurv"}
+
 def load_simulate_results(dataFolderName, 
-                        subset=[50, 200, 500, 1000, 2000, 5000, 8000],
-                        modelnames=['coxnet','rsf','gb','deepsurvk']):
+                        modelnames=['coxnet','svm','rsf','deepsurv-torch'],
+                        fileName = 'model.results.10runs.txt'):
     
-    results = pd.DataFrame({'n train': subset})
+    results = pd.DataFrame({'n train': []})
     for mdl in modelnames:
-        file_dir = os.path.join('models', dataFolderName, mdl, 'model.results.txt')
+        file_dir = os.path.join('models', dataFolderName, mdl, fileName)
         try:
             result_df = pd.read_table(file_dir, index_col=0)
         except:
-            continue
-        result_df.columns = ["_".join((col, mdl)) if col!='n train' else col for col in result_df.columns.tolist() ]
-        results = results.merge(result_df, on='n train', how='outer')# right_on=result_df.columns[0])
+            result_df = pd.read_table(os.path.join('models', dataFolderName, mdl, 'model.results.txt'), index_col=0)
+        result_df['model'] = modelname_dict[mdl]
+        results = pd.concat([results, result_df], axis=0)
 
     return results
-
 
 ############# DeepSurv Utility Functions ############
 
@@ -146,6 +147,20 @@ def dataframe_to_deepsurv_ds(df,
         }
         
 
+def plot_simulation_data(train_df, test_df):
+    '''Function to plot simulated data.'''
+    # observe data
+    print("Event rate in train set: %f" % (sum(train_df['status']==1) / train_df.shape[0]))
+    print("Event rate in test set: %f" %  (sum(test_df['status']==1) / test_df.shape[0]))
+    print('Survival time distribution:')
+    _, ax = plt.subplots(figsize=(3,3))
+    ax.hist(train_df['time'], label='train')
+    # ax.hist(val_df['time'],   label='val', alpha=.8)
+    ax.hist(test_df['time'], label='test', alpha=0.6)
+    ax.legend(fontsize=12)
+    plt.show()
+    
+    
 def dataframe_to_scikitsurv_ds(df, time_col='time', status_col='status'):
     """Convert input data (pandas DataFrame) to scikit-survival 
     compatible format for model training.
