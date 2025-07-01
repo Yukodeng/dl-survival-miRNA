@@ -3,26 +3,28 @@ DeepSurv/
 deepsurvTorch/
 archive/
 __pycache__/
+logs/
+jobs/
 
 # saved models
 weight_checkpoint_*
-.db
+*.db
 *.pkl
 
 # scripts
 *.sh
+*.out
+slurm-temp.log
 
 # data
-data/2024-08-08/
-data/2024-08-15/
-data/082924/
-GDCdata/
-# *maf_generated.csv
-simulation/batch_effect/results/
-!simulation/batch_effect/results/organized/
-data/with_without_batch_maf/
+raw-data/
+data/
 simulate_survival*.csv
 MSKpair_*.csv
-!MSKpair_miRNA_names.csv
-!MSKpair_MXF_merge.csv
-!MSKpair_PMFH_merge.csv
+# !MSKpair_miRNA_names.csv
+# !MSKpair_MXF_merge.csv
+# !MSKpair_PMFH_merge.csv
+# *maf_generated.csv
+simulation/batch_effect/
+# simulation/batch_effect/results/
+# !simulation/batch_effect/results/organized/

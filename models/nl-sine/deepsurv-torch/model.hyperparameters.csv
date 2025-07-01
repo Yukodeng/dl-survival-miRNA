@@ -1,6 +1,0 @@
-,n train,hyperparameters
-0,50,"{'learning_rate': 0.00886724216079615, 'dropout': 0.1}"
-1,500,"{'learning_rate': 0.004052497934739238, 'dropout': 0.5}"
-2,1000,"{'learning_rate': 0.0027288713850125833, 'dropout': 0.5}"
-3,2000,"{'learning_rate': 0.0023014017155613144, 'dropout': 0.5}"
-4,5000,"{'learning_rate': 0.0011589206071232186, 'dropout': 0.1}"
