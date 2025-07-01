@@ -1,8 +1,0 @@
-Loading required package: Matrix
-Loaded glmnet 4.1-8
-Loading required package: mgcv
-Loading required package: nlme
-This is mgcv 1.9-1. For overview type 'help("mgcv-package")'.
-Loading required package: genefilter
-slurmstepd-omega1: error: *** STEP 40350.0 ON omega1 CANCELLED AT 2025-02-18T10:38:41 ***
-slurmstepd-omega1: error: *** JOB 40350 ON omega1 CANCELLED AT 2025-02-18T10:38:41 ***
