@@ -191,7 +191,37 @@ class EvalSurv:
         """
         return concordance_td(self.durations, self.events, self.surv.values,
                               self._duration_idx(), method)
-
+    
+    
+    ## update 07/15/2025 (YD): Add stratified C-index metric
+    def stratified_concordance_td(self, method='adj_antolini', batch_indices=None):
+        batch_indices = np.repeat(1, len(self.durations)) if batch_indices is None else batch_indices
+        batch_indices = batch_indices.detach().numpy() if not isinstance(batch_indices, np.ndarray) else batch_indices
+        batches = np.unique(batch_indices)
+        c_index_ls , n_events_ls = np.zeros(len(batches)), np.zeros(len(batches))
+        
+        for i, batch in enumerate(batches):
+            # Filter data by batch
+            mask = (batch_indices == batch)
+            if mask.sum() == 0:
+                continue  # skip empty batch
+            batch_durations = self.durations[mask]
+            batch_events = self.events[mask]
+            batch_surv = self.surv.iloc[:, mask]
+            if batch_events.sum() == 0:
+                continue
+            
+            # Compute concordance for the current batch
+            c_index_batch = concordance_td(
+                batch_durations, batch_events, batch_surv.values,
+                self.idx_at_times(batch_durations), method
+            )
+            n_events_ls[i] = batch_events.sum()
+            c_index_ls[i] = c_index_batch
+            
+        return np.sum(c_index_ls*n_events_ls) / np.sum(n_events_ls) if np.sum(n_events_ls) > 0 else float('nan')
+        
+        
     def brier_score(self, time_grid, max_weight=np.inf):
         """Brier score weighted by the inverse censoring distribution.
         See Section 3.1.2 or [1] for details of the wighting scheme.
@@ -216,7 +246,7 @@ class EvalSurv:
                               self.censor_surv.index_surv, max_weight, True, self.steps,
                               self.censor_surv.steps)
         return pd.Series(bs, index=time_grid).rename('brier_score')
-
+    
     def nbll(self, time_grid, max_weight=np.inf):
         """Negative binomial log-likelihood weighted by the inverse censoring distribution.
         See Section 3.1.2 or [1] for details of the wighting scheme.
@@ -259,6 +289,40 @@ class EvalSurv:
                                            self.censor_surv.surv.values, self.index_surv,
                                            self.censor_surv.index_surv, max_weight, self.steps,
                                            self.censor_surv.steps)
+
+    ## update 07/15/2025 (YD): Add stratified brier score metric
+    def stratified_integrated_brier_score(self, time_grid, max_weight=np.inf, batch_indices=None):
+        if self.censor_surv is None:
+            raise ValueError("Need to add censor_surv to compute briser score. Use 'add_censor_est'")
+        
+        batch_indices = np.repeat(1, len(self.durations)) if batch_indices is None else batch_indices
+        batch_indices = batch_indices.detach().numpy() if not isinstance(batch_indices, np.ndarray) else batch_indices
+        batches = np.unique(batch_indices)
+        brier_ls , n_events_ls = np.zeros(len(batches)), np.zeros(len(batches))
+        
+        for i, batch in enumerate(batches):
+            # Filter data by batch
+            mask = (batch_indices == batch)
+            if mask.sum() == 0:
+                continue  # skip empty batch
+            batch_durations = self.durations[mask]
+            batch_events = self.events[mask]
+            batch_surv = self.surv.iloc[:, mask]
+            if batch_events.sum() == 0:
+                continue
+            batch_surv_values = self.surv.values[:, mask]
+            batch_censor_surv_values = self.censor_surv.surv.values[:, mask] 
+            
+            # Compute integrated brier score for the current batch
+            brier_batch = ipcw.integrated_brier_score(time_grid, batch_durations, batch_events, 
+                                            batch_surv_values, batch_censor_surv_values, 
+                                            self.index_surv, self.censor_surv.index_surv, max_weight, 
+                                            self.steps, self.censor_surv.steps)
+            n_events_ls[i] = batch_events.sum()
+            brier_ls[i] = brier_batch
+        
+        return np.sum(brier_ls*n_events_ls) / np.sum(n_events_ls) if np.sum(n_events_ls) > 0 else float('nan')
+
 
     def integrated_nbll(self, time_grid, max_weight=np.inf):
         """Integrated negative binomial log-likelihood weighted by the inverse censoring distribution.
@@ -355,77 +419,3 @@ class EvalSurv:
                                                         self.events, self.surv.values, self.index_surv,
                                                         self.steps)
         return -ibll
-
-
-
-class EvalSurvStratified(EvalSurv):
-    """Stratified evaluation class for survival predictions by batch.
-    
-    Arguments:
-        surv {pd.DataFrame} -- Survival predictions.
-        durations {np.array} -- Durations of test set.
-        events {np.array} -- Events of test set.
-        batch_indices {np.array} -- Batch labels for stratification.
-
-    Keyword Arguments:
-        censor_surv {str, pd.DataFrame, EvalSurv} -- Censoring distribution.
-            If provided data frame (survival function for censoring) or EvalSurv object,
-            this will be used. 
-            If 'km', we will fit a Kaplan-Meier to the dataset.
-            (default: {None})
-        censor_durations {np.array}: -- Administrative censoring times. (default: {None})
-        steps {str} -- For durations between values of `surv.index` choose the higher index 'pre'
-            or lower index 'post'. For a visualization see `help(EvalSurv.steps)`. (default: {'post'})
-    """
-    def __init__(self, surv, durations, events, batch_indices, censor_surv=None, censor_durations=None, steps='post'):
-        super().__init__(surv, durations, events, censor_surv, censor_durations, steps)
-        self.batch_indices = batch_indices  # Store batch indices for stratified evaluation
-
-    def concordance_td(self, method='adj_antolini'):
-        """Calculate the time-dependent concordance index stratified by batch."""
-        batches = np.unique(self.batch_indices)
-        c_index_ls , n_events_ls = np.zeros(len(batches))
-
-        for i, batch in enumerate(batches):
-            # Filter data by batch
-            mask = self.batch_indices == batch
-            batch_durations = self.durations[mask]
-            batch_events = self.events[mask]
-            batch_surv = self.surv.iloc[:, mask]
-
-            # Compute concordance for the current batch
-            c_index_batch = concordance_td(
-                batch_durations, batch_events, batch_surv.values,
-                self.idx_at_times(batch_durations), method
-            )
-            
-            n_events_ls[i] = batch_events.sum()
-            c_index_ls[i] = c_index_batch
-            
-        return np.sum(c_index_ls*n_events_ls) / np.sum(n_events_ls) if  np.sum(n_events_ls)>0 else float('nan')
-    
-    
-    def brier_score(self, time_grid, max_weight=np.inf):
-        """Calculate Brier score stratified by batch."""
-        brier_scores = []
-
-        for batch in np.unique(self.batch_indices):
-            # Filter data by batch
-            mask = self.batch_indices == batch
-            batch_durations = self.durations[mask]
-            batch_events = self.events[mask]
-            batch_surv = self.surv.iloc[:, mask]
-            batch_censor_surv = None if self.censor_surv is None else self.censor_surv.surv.iloc[:, mask]
-
-            # Compute Brier score for the batch
-            batch_bs = ipcw.brier_score(
-                time_grid, batch_durations, batch_events, batch_surv.values,
-                batch_censor_surv.values if batch_censor_surv is not None else None,
-                self.index_surv, self.censor_surv.index_surv if self.censor_surv is not None else None,
-                max_weight, True, self.steps, self.censor_surv.steps if self.censor_surv is not None else 'post'
-            )
-            brier_scores.append(batch_bs)
-
-        # Aggregate Brier scores across batches
-        brier_scores_mean = np.mean(brier_scores, axis=0)
-        return pd.Series(brier_scores_mean, index=time_grid).rename('brier_score')

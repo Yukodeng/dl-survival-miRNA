@@ -53,8 +53,9 @@ class SurvivalModelPipeline():
         elif 'csv' in fileName:
             model_results.to_csv(os.path.join(out_dir,fileName), index=False)
         else:
-            print('Please specify a file name with either a txt or csv extension.')
-    
+            # print('Please specify a file name with either a txt or csv extension.')
+            fileName = fileName + '.csv'
+            model_results.to_csv(os.path.join(out_dir,fileName), index=False)
     
     def parse_hyperparameters(self, trial, config):
         params = {}
@@ -104,7 +105,7 @@ class SurvivalModelPipeline():
                             study_name=None,
                             config=None,
                             n_jobs=1,
-                            timeout=7200):
+                            timeout=12000):
         
         # Create an Optuna study for hyperparameter optimization
         study_name = f"{self.modelString}-{self.batchNormType}-{self.dataName}-{n_samples}" if study_name is None else study_name
@@ -244,7 +245,11 @@ class SurvivalModelPipeline():
                 run_train_brier.append(tr_brier)
                 run_test_brier.append(te_brier)
                 run_time.append(duration)
-            
+                
+                print(f"(runtime: {duration:.2f}s)   |\
+                        (C-index)  Train: {tr_cind:.3f}, Test: {te_cind:.3f}   |\
+                        (Brier)  Train: {tr_brier:.3f}, Test: {te_brier:.3f}\n")  
+                
             print(
                 f"(Avg. runtime: {np.mean(run_time):.2f}s)   |\
                 (C-index)  Train: {round(np.mean(run_train_cind),3)}, Test: {round(np.mean(run_test_cind),3)}   |\

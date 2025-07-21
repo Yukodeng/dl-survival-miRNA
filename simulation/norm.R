@@ -19,6 +19,7 @@ norm.TC <- function(raw, groups = rep(1, ncol(raw))) {
   ))
 }
 
+
 norm.UQ <- function(raw, groups = rep(1, ncol(raw))) {
   if (!requireNamespace("edgeR", quietly = TRUE)) {
     stop("Package \"edgeR\" needed for this function to work. Please install it.",

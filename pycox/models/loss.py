@@ -46,9 +46,8 @@ def cox_ph_loss(log_h: Tensor, durations: Tensor, events: Tensor, eps: float = 1
     return cox_ph_loss_sorted(log_h, events, eps)
 
 
-####### [UPDATE] 1105
-def stratified_cox_ph_loss(log_h: Tensor, durations: Tensor, events: Tensor, 
-                           batch_indices: Tensor, eps: float = 1e-7) -> Tensor:
+####### [UPDATE] 07/07/2025
+def stratified_cox_ph_loss(log_h: Tensor, durations: Tensor, events: Tensor, batch_indices: Tensor, eps: float = 1e-7) -> Tensor:
     """
     Stratified CoxPH loss that computes partial likelihood across batches.
 
@@ -62,22 +61,27 @@ def stratified_cox_ph_loss(log_h: Tensor, durations: Tensor, events: Tensor,
     Returns:
         torch.Tensor -- The total stratified negative log partial likelihood.
     """
-    unique_batches = np.unique(batch_indices)
-    losses = torch.zeros(len(unique_batches))
-    
+    device = batch_indices.device
+    unique_batches = torch.unique(batch_indices)
+    losses = torch.zeros(len(unique_batches), device=device)
+        
     for i, batch in enumerate(unique_batches):
         # Select data for the current batch
         mask = (batch_indices == batch)
-        idx = durations[mask].sort(descending=True)[1]
+        if mask.sum() == 0:
+            continue  # skip empty batch
         
-        log_h_batch = log_h[mask][idx]
+        # Sort by descending durations
+        idx = torch.argsort(durations[mask], descending=True)       
+        
         events_batch = events[mask][idx]
+        log_h_batch = log_h[mask][idx]
+        if events_batch.sum() == 0:
+            continue 
+        
         losses[i] = cox_ph_loss_sorted(log_h_batch, events_batch, eps)
-    
-    return torch.sum(losses)
-
-
-
+        
+    return losses.sum()
 
 class CoxPHLossSorted(torch.nn.Module):
     """Loss for CoxPH.
@@ -109,7 +113,7 @@ class CoxPHLoss(torch.nn.Module):
     def forward(self, log_h: Tensor, durations: Tensor, events: Tensor) -> Tensor:
         return cox_ph_loss(log_h, durations, events)
 
-
+## Update 07/07/2025
 class CoxPHLossStratified(torch.nn.Module):
     """Loss for CoxPH model with batch variable.
 
@@ -119,5 +123,15 @@ class CoxPHLossStratified(torch.nn.Module):
     We just compute a cumulative sum, and not the true Risk sets. This is a
     limitation, but simple and fast.
     """
+    # def forward(self, log_h: Tensor, durations: Tensor, events: Tensor, batch_indices: Tensor) -> Tensor:
+        # return stratified_cox_ph_loss(log_h, durations, events, batch_indices)
     def forward(self, log_h: Tensor, durations: Tensor, events: Tensor, batch_indices: Tensor) -> Tensor:
+        if torch.isnan(log_h).any():
+            print("NaNs detected in log hazards")
+        if torch.isnan(durations).any():
+            print("NaNs detected in input survival time")
+        if torch.isnan(events).any():
+            print("NaNs detected in input events")
+        if (events.sum() == 0).item():
+            print("No observed events in batch (val)")
         return stratified_cox_ph_loss(log_h, durations, events, batch_indices)

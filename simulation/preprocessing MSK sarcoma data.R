@@ -10,6 +10,7 @@ library(reticulate)
 setwd("~/dl-survival-miRNA/")
 
 # Load RWD ----------------------------------------------------------
+
 # mirna.names = colnames(read.csv("MSKpair_MXF_merge.csv")[2:2067])
 # mirna.names = as.data.frame(mirna.names)
 # write.csv(mirna.names, "../data/MSKpair_miRNA_names.csv")
@@ -17,6 +18,17 @@ setwd("~/dl-survival-miRNA/")
 # mxf.rwd=read.csv("MSKpair_MXF_merge.csv")[,2:1034]
 # pmfh.rwd=read.csv("MSKpair_PMFH_merge.csv")[,2:1034]
 load(file.path('raw-data', 'precision.data.RData'))
+
+
+# Batch effects ------------------------------------------------------
+
+batch.rwd = log(t(data.test)+0.5) - log(t(data.benchmark)+0.5)
+hist(apply(batch.rwd, 2, function(x) mean(abs(x))), main = "RWD: Mean Absolute Batch Effects (log)")
+hist(apply(log(t(data.benchmark)+0.5), 2, function(x) mean(abs(x))), main = "RWD: Mean Absolute True Counts (log)")
+
+
+# Get maximums per gene ----------------------------------------------
+
 workingt.rwd = rbind(data.benchmark, data.test)
 
 workingt.rwd.log = log2(workingt.rwd+1)
@@ -27,7 +39,6 @@ rwd.sd  = sd(workingt.rwd.log)
 print(rwd.max)
 print(rwd.sd)
 
-# ## Get maximums per gene ----
 # working.rwd=rbind(mxf.rwd, pmfh.rwd)
 # 
 # # working.rwd %>% View()
@@ -43,6 +54,7 @@ print(rwd.sd)
 
  
 # Load augmented data with/without batch --------------------------------
+
 ### Attempt 11APR2025; N=10000/batch
 N = 10000
 P = 538 
@@ -78,7 +90,14 @@ surv.data.cap = (2 ^ as.data.frame(lapply(log2(surv.data+1), cap_and_add_noise, 
 max(surv.data.cap)
 
 
-# Test reticulate -------------------------------------------------------
+######## examine absolute batch sizes ##
+# hist(apply(batch.obs.sorted, 2, function(x) mean(abs(x))), main = "Mean Absolute Batch effect (log)")
+# hist(apply(xtrue.train.log, 2, function(x) mean(abs(x))), main = "Mean Absolute True Count (log)")
+##################################### ##
+
+
+# Test reticulate -----------------------------------------------------
+
 skl_ms <- import("sklearn.model_selection")
 
 n = 500
@@ -110,7 +129,7 @@ for (run in 1:n_run) {
   x0_train = data_train[,selected.geneid]
   x0_test  = data_test[,selected.geneid]
   
-  # oracle analysis -----------
+  ## oracle analysis -----------
   coxfit_o = tryCatch(
       coxph(Surv(data_train$time, data_train$status) ~ as.matrix(x0_train)), 
       error=function(e) e,
