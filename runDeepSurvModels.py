@@ -9,8 +9,8 @@ from sklearn_pandas import DataFrameMapper
 import torch
 import torchtuples as tt
 from utils import *
-from pycox.models.cox import CoxPH#, CoxPHStratified
-from pycox.evaluation.eval_surv import EvalSurv#, EvalurvStratified
+from pycox.models.cox import CoxPH, CoxPHStratified, StratifiedDataset
+from pycox.evaluation.eval_surv import EvalSurv
 import optuna
 
 np.random.seed(123)
@@ -58,12 +58,13 @@ class DeepSurvPipeline():
         time_col='time', status_col='status', batch_col="batch.id",
         batchNormType=None,
         dataName=None, 
-        hyperparameters=None, 
+        hyperparameters=None,
+        is_stratified=False, 
         storage_url="sqlite:///deepsurv-torch-hp-log.db",
         random_state=42
     ):
-        self.train_df=train_df
-        self.test_df=test_df
+        self.train_df = train_df
+        self.test_df = test_df
         self.n = train_df.shape[0]
         self.test_size = test_size
         self.time_col = time_col
@@ -71,12 +72,13 @@ class DeepSurvPipeline():
         self.batch_col = batch_col
         self.batchNormType = batchNormType
         self.dataName = dataName
+        self.is_stratified = is_stratified
         self.hyperparameters = hyperparameters
         self.storage_url = storage_url
         self.random_state = random_state
         self.best_params = None
         self.model = None
-        self.modelString = 'deepsurv-torch'
+        self.modelString = "%sdeepsurv-torch" % (['','stratified-'][self.is_stratified])
         self.patience = 30
         self.min_delta = 1e-3
     
@@ -111,6 +113,23 @@ class DeepSurvPipeline():
         
         return x, y, mapper
     
+    def write(self, model_results, out_dir=None, fileName=None):
+        
+        out_dir=os.path.join('models', self.batchNormType, self.dataName, self.modelString) if out_dir is None else out_dir
+        os.makedirs(out_dir, exist_ok=True)
+        
+        # save results as txt or csv file
+        today = datetime.now().strftime("%Y%m%d")
+        fileName = f'model_results_{today}.csv' if fileName is None else fileName
+        
+        if 'txt' in fileName:
+            model_results.to_csv(os.path.join(out_dir,fileName), sep='\t')
+        elif 'csv' in fileName:
+            model_results.to_csv(os.path.join(out_dir,fileName), index=False)
+        else:
+            fileName = fileName + '.csv'
+            model_results.to_csv(os.path.join(out_dir,fileName), index=False)
+            # print('Please specify a file name with either a txt or csv extension.')
     
     def train_mlp(self, 
                 train_df=None,
@@ -160,44 +179,45 @@ class DeepSurvPipeline():
                 Integrated Brier scores calculated at 50 time points
                 selected evenly throughout min and max survival time in the train and test data.
         """
-        # ================== Prepare data ===================
+        # ================== Prepare data ====================
         train_df = train_df if train_df is not None else self.train_df
         val_df  = val_df if val_df is not None else self.test_df
-        if self.batch_col in train_df.columns:
-            train_df = train_df.drop(columns=self.batch_col)
-        if self.batch_col in val_df.columns:
-            val_df = val_df.drop(columns=self.batch_col)
         
+        batch_ids_train = train_df[self.batch_col].to_numpy().reshape(-1)
+        batch_ids_val = val_df[[self.batch_col]].to_numpy().reshape(-1)
+        
+        train_df = train_df.drop(columns=self.batch_col)
+        val_df = val_df.drop(columns=self.batch_col)
         x_train, y_train, mapper = self._preprocess_data(train_df, fit_scaler=True)
         x_val, y_val, _ = self._preprocess_data(val_df, mapper=mapper, fit_scaler=False)
         
-        # ============== GPU integration ============
+        # ================== GPU integration =================
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         # Convert numpy arrays to torch tensors and move to GPU
         x_train = torch.from_numpy(x_train).to(device)
         x_val = torch.from_numpy(x_val).to(device)
         
-        # Unpack and convert y = (time, event)
         durations_train = torch.from_numpy(y_train[0]).float().to(device)
         events_train = torch.from_numpy(y_train[1]).float().to(device)
         durations_val = torch.from_numpy(y_val[0]).float().to(device)
         events_val = torch.from_numpy(y_val[1]).float().to(device)
+        batch_ids_train = torch.from_numpy(batch_ids_train).long().to(device)
+        batch_ids_val = torch.from_numpy(batch_ids_val).long().to(device)
         
         y_train = (durations_train, events_train)
         y_val = (durations_val, events_val)
         
-        input_size = x_train.shape[1]
-        output_size = 1
-        
-        # Set hyperparameters with input / default values
+        # =============== Set hyperparameters ================
         if params is None and self.best_params is None:
             print("No hyperparameters provided. Training with defaults.")
             params = {}
         elif params is None:
             params = self.best_params
-        
-        num_nodes = params.get("num_nodes", [32,32])            # Default # layers & nodes
+            
+        input_size = x_train.shape[1]
+        output_size = 1
+        num_nodes = params.get("num_nodes", [32,32])            # Default num of layers & nodes
         dropout = params.get("dropout", 0.1)                    # Default dropout rate
         learning_rate = params.get("learning_rate", 1e-4)       # Default learning rate
         batch_size = params.get("batch_size", 64)               # Default batch size
@@ -205,12 +225,12 @@ class DeepSurvPipeline():
         batch_norm = params.get("batch_norm", True)             # Default batch normalization
         output_bias = params.get("output_bias", True)           # Default output bias
         weight_decay = params.get("weight_decay", 1e-4)         # Default weight decay
-        activation_map = {
+        activation_map = {                                      
             "ReLU": torch.nn.ReLU,
             "LeakyReLU": torch.nn.LeakyReLU,
             "SELU": torch.nn.SELU
-        } # Activation function
-        activation = activation_map.get(params.get("activation", "ReLU")) # Default output bias
+        } 
+        activation = activation_map.get(params.get("activation", "ReLU")) # Activation function
         
         # =================== Build Neural Net ===================
         # Define network
@@ -227,50 +247,67 @@ class DeepSurvPipeline():
         
         # Define optimizer 
         optimizer = tt.optim.Adam(weight_decay=weight_decay, lr=learning_rate)
-        model = CoxPH(net, optimizer)
         
-        # =================== Train Model ====================
         # Get default early stopping settings if not defined 
         patience = self.patience if patience is None else patience
         min_delta = self.min_delta if min_delta is None else min_delta
-        
         callbacks = [tt.callbacks.EarlyStopping(patience=patience, min_delta=min_delta)]
         
+        # =================== Train Model ====================
         start = time.time() # Record iteration start time
-        log = model.fit(
-            x_train, y_train,
-            batch_size=batch_size,
-            epochs=epochs,
-            callbacks=callbacks, 
-            verbose=verbose,
-            val_data=(x_val, y_val),
-            val_batch_size=batch_size
-        )
+        if self.is_stratified:
+            train_dataset = torch.utils.data.TensorDataset(x_train, durations_train, events_train, batch_ids_train)
+            val_dataset = torch.utils.data.TensorDataset(x_val, durations_val, events_val, batch_ids_val)
+            train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+            val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+            
+            model = CoxPHStratified(net, optimizer)
+            log = model.fit_dataloader(
+                train_loader,
+                epochs=epochs,
+                callbacks=callbacks,
+                verbose=verbose,
+                val_dataloader=val_loader
+            )
+        else:
+            model = CoxPH(net, optimizer)
+            log = model.fit(
+                x_train, y_train,
+                batch_size=batch_size,
+                epochs=epochs,
+                callbacks=callbacks, 
+                verbose=verbose,
+                val_data=(x_val, y_val),
+                val_batch_size=batch_size
+            )
         stop = time.time() # Record time when training finished
         duration = round(stop - start, 2)
         
         # ==================== Evaluation ====================
-        _ = model.compute_baseline_hazards()
+        _ = model.compute_baseline_hazards(input=x_train, target=(durations_train, events_train))   
         
         # Convert torch tensors back to numpy objects for evaluation
         x_train_np = x_train.detach().cpu().numpy()
         x_val_np = x_val.detach().cpu().numpy()
         
         durations_train_np = durations_train.detach().cpu().numpy()
-        events_train_np    = events_train.detach().cpu().numpy()
         durations_val_np   = durations_val.detach().cpu().numpy()
+        events_train_np    = events_train.detach().cpu().numpy()
         events_val_np      = events_val.detach().cpu().numpy()
         
         # Initialize EvalSurv objects 
         tr_surv  = model.predict_surv_df(x_train_np)
         val_surv = model.predict_surv_df(x_val_np)
-        
         tr_ev = EvalSurv(tr_surv, durations_train_np, events_train_np, censor_surv='km')
         val_ev = EvalSurv(val_surv, durations_val_np, events_val_np, censor_surv='km')
         
         # Concordance index ----------------
-        tr_c_index  = tr_ev.concordance_td() 
-        val_c_index = val_ev.concordance_td() 
+        if self.is_stratified:
+            tr_c_index  = tr_ev.stratified_concordance_td(batch_indices=batch_ids_train) 
+            val_c_index = val_ev.stratified_concordance_td(batch_indices=batch_ids_val) 
+        else:
+            tr_c_index  = tr_ev.concordance_td() 
+            val_c_index = val_ev.concordance_td() 
         
         # Integrated Brier score -----------
         min_surv = np.ceil(max(np.min(durations_train_np), np.min(durations_val_np)))
@@ -278,8 +315,12 @@ class DeepSurvPipeline():
         times = np.linspace(min_surv, max_surv, 20)
         
         if calculate_brier:
-            tr_brier  = tr_ev.integrated_brier_score(time_grid=times) 
-            val_brier = val_ev.integrated_brier_score(time_grid=times) 
+            if self.is_stratified:
+                tr_brier  = tr_ev.stratified_integrated_brier_score(time_grid=times, batch_indices=batch_ids_train) 
+                val_brier = val_ev.stratified_integrated_brier_score(time_grid=times, batch_indices=batch_ids_val)
+            else:
+                tr_brier  = tr_ev.integrated_brier_score(time_grid=times) 
+                val_brier = val_ev.integrated_brier_score(time_grid=times) 
         else:
             tr_brier = val_brier = np.nan
         
@@ -406,24 +447,6 @@ class DeepSurvPipeline():
         print(f"Found best hyperparameters: {self.best_params}")
         
         return study
-    
-    
-    def write(self, model_results, out_dir=None, fileName=None):
-        
-        out_dir=os.path.join('models', self.batchNormType, self.dataName, self.modelString) if out_dir is None else out_dir
-        os.makedirs(out_dir, exist_ok=True)
-        
-        # save results as txt or csv file
-        today = datetime.now().strftime("%Y%m%d")
-        fileName = f'model_results_{today}.csv' if fileName is None else fileName
-        
-        if 'txt' in fileName:
-            model_results.to_csv(os.path.join(out_dir,fileName), sep='\t')
-        elif 'csv' in fileName:
-            model_results.to_csv(os.path.join(out_dir,fileName), index=False)
-        else:
-            print('Please specify a file name with either a txt or csv extension.')
-    
     
     def train_over_subsets(self,
                            subset_sizes=[100, 500, 1000, 2000, 5000, 10000],

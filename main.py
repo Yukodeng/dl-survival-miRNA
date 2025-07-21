@@ -132,6 +132,7 @@ def main(config_path):
         batchNormType=config['batchNormType'],
         dataName=config['dataName'],
         hyperparameters=config['hyperparameters'],
+        is_stratified=config.get('stratified', True),
         storage_url=config['storage_url']
     )
     if "param_override" in config:
@@ -144,6 +145,7 @@ def main(config_path):
         
     # ============ Run Training Pipeline ============ 
     logger.info("Launching training pipeline with subset sizes %s...", config["subset_sizes"])
+    logger.info("Training with %s CoxPH neural network" % ['non-stratified', 'stratified'][pipeline.is_stratified])
     
     pipeline.train_over_subsets(
         subset_sizes=config['subset_sizes'],
