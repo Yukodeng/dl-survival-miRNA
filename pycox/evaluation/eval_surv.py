@@ -194,11 +194,12 @@ class EvalSurv:
     
     
     ## update 07/15/2025 (YD): Add stratified C-index metric
+    ## update 07/21/2026 (YD): Weighted by number of comparable pairs per Andy's code
     def stratified_concordance_td(self, method='adj_antolini', batch_indices=None):
         batch_indices = np.repeat(1, len(self.durations)) if batch_indices is None else batch_indices
-        batch_indices = batch_indices.detach().numpy() if not isinstance(batch_indices, np.ndarray) else batch_indices
+        batch_indices = batch_indices.detach().cpu().numpy() if not isinstance(batch_indices, np.ndarray) else batch_indices
         batches = np.unique(batch_indices)
-        c_index_ls , n_events_ls = np.zeros(len(batches)), np.zeros(len(batches))
+        c_index_ls , n_pairs_ls = np.zeros(len(batches)), np.zeros(len(batches))
         
         for i, batch in enumerate(batches):
             # Filter data by batch
@@ -212,14 +213,14 @@ class EvalSurv:
                 continue
             
             # Compute concordance for the current batch
-            c_index_batch = concordance_td(
+            c_index_batch, n_pairs_batch = concordance_td(
                 batch_durations, batch_events, batch_surv.values,
-                self.idx_at_times(batch_durations), method
+                self.idx_at_times(batch_durations), method=method
             )
-            n_events_ls[i] = batch_events.sum()
+            n_pairs_ls[i] = n_pairs_batch
             c_index_ls[i] = c_index_batch
             
-        return np.sum(c_index_ls*n_events_ls) / np.sum(n_events_ls) if np.sum(n_events_ls) > 0 else float('nan')
+        return np.sum(c_index_ls*n_pairs_ls) / np.sum(n_pairs_ls) if np.sum(n_pairs_ls) > 0 else float('nan')
         
         
     def brier_score(self, time_grid, max_weight=np.inf):
@@ -296,7 +297,7 @@ class EvalSurv:
             raise ValueError("Need to add censor_surv to compute briser score. Use 'add_censor_est'")
         
         batch_indices = np.repeat(1, len(self.durations)) if batch_indices is None else batch_indices
-        batch_indices = batch_indices.detach().numpy() if not isinstance(batch_indices, np.ndarray) else batch_indices
+        batch_indices = batch_indices.detach().cpu().numpy() if not isinstance(batch_indices, np.ndarray) else batch_indices
         batches = np.unique(batch_indices)
         brier_ls , n_events_ls = np.zeros(len(batches)), np.zeros(len(batches))
         

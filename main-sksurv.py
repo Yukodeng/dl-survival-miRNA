@@ -54,6 +54,7 @@ def main(args):
     # Run training pipeline
     subset_sizes = [int(x) for x in args.subsets.split(",")] if args.subsets else [100, 500, 1000, 2000, 5000, 10000]
     runs_per_size = [int(x) for x in args.runs.split(",")] if args.runs else [20]*len(subset_sizes)
+    run_seeds = [int(x) for x in args.seeds.split(",")] if args.seeds else None
     splits_per_size = [int(x) for x in args.splits.split(",")] if args.splits else [3,5,5,10,10,10]
     trials_per_size = [int(x) for x in args.trials.split(",")] if args.trials else [20]*len(subset_sizes)
     
@@ -61,6 +62,7 @@ def main(args):
     _ = pipeline.train_over_subsets(
         subset_sizes=subset_sizes,
         runs_per_size=runs_per_size,
+        run_seeds = run_seeds,
         splits_per_size=splits_per_size,
         trials_per_size=trials_per_size,
         trial_threshold=args.trial_threshold,
@@ -79,6 +81,7 @@ if __name__ == "__main__":
     parser.add_argument("--modelType", type=str, required=True, choices=["coxnet", "svm", "rsf", "gb"], help="Model type")
     parser.add_argument("--subsets", type=str, help="Comma-separated training subset sizes (e.g., 100,500,1000,2000,5000,10000)")
     parser.add_argument("--runs", type=str, help="Comma-separated runs per size (default 20 each)")
+    parser.add_argument("--seeds", type=str, default=None, help="Comma-separated list of integer seeds for each run (e.g., 5,6,7,8,9)")
     parser.add_argument("--splits", type=str, help="Comma-separated k-fold splits per size (e.g., 3,5,5,10,10,10)")
     parser.add_argument("--trials", type=str, help="Comma-separated trials per size (default 20 each)")
     parser.add_argument("--trial_threshold", type=int, default=20, help="Trial threshold for tuning reuse (default 20)")

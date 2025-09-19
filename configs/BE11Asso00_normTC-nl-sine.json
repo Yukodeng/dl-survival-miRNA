@@ -3,7 +3,7 @@
   "dataName": "nl-sine",
   "storage_url": "sqlite:///deepsurv-torch-hp-log-1.db",
   "keywords": [
-    "062525"
+    "080425"
   ],
   "time_col": "time",
   "status_col": "status",

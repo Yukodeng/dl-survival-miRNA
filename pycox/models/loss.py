@@ -26,6 +26,9 @@ def cox_ph_loss_sorted(log_h: Tensor, events: Tensor, eps: float = 1e-7) -> Tens
         events = events.float()
     events = events.view(-1)
     log_h = log_h.view(-1)
+    if events.sum() == 0:
+        return log_h.sum() * 0.0  # update 08/11/25: safe dummy loss
+    
     gamma = log_h.max()
     log_cumsum_h = log_h.sub(gamma).exp().cumsum(0).add(eps).log().add(gamma)
     return - log_h.sub(log_cumsum_h).mul(events).sum().div(events.sum())
@@ -68,7 +71,7 @@ def stratified_cox_ph_loss(log_h: Tensor, durations: Tensor, events: Tensor, bat
     for i, batch in enumerate(unique_batches):
         # Select data for the current batch
         mask = (batch_indices == batch)
-        if mask.sum() == 0:
+        if mask.sum() == 0 or events[mask].sum() == 0:
             continue  # skip empty batch
         
         # Sort by descending durations
@@ -80,8 +83,10 @@ def stratified_cox_ph_loss(log_h: Tensor, durations: Tensor, events: Tensor, bat
             continue 
         
         losses[i] = cox_ph_loss_sorted(log_h_batch, events_batch, eps)
-        
-    return losses.sum()
+    
+    total_loss = losses.sum()
+    return total_loss if total_loss.requires_grad else log_h.sum() * 0.0
+
 
 class CoxPHLossSorted(torch.nn.Module):
     """Loss for CoxPH.
