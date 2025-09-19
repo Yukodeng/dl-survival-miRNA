@@ -5,6 +5,7 @@ archive/
 __pycache__/
 logs/
 jobs/
+results/
 
 # saved models
 weight_checkpoint_*

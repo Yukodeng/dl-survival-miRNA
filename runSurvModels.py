@@ -45,17 +45,25 @@ class SurvivalModelPipeline():
         '''
         out_dir = os.path.join('models', self.batchNormType, self.dataName, self.modelString) if out_dir is None else out_dir
         os.makedirs(out_dir, exist_ok=True)
-        today = datetime.now().strftime("%Y%m%d")
+        today = datetime.now().strftime("%m%d%y")
         fileName = f'model_results_{today}.csv' if fileName is None else fileName
+        save_path = os.path.join(out_dir,fileName)
         
-        if 'txt' in fileName:
-            model_results.to_csv(os.path.join(out_dir,fileName), sep='\t')
-        elif 'csv' in fileName:
-            model_results.to_csv(os.path.join(out_dir,fileName), index=False)
+        if os.path.exists(save_path):
+            # append to existing results file
+            if 'txt' in fileName:
+                model_results.to_csv(save_path, mode='a', sep='\t', header=False, index=False)
+            elif 'csv' in fileName:
+                model_results.to_csv(save_path, mode='a', header=False, index=False)
         else:
-            # print('Please specify a file name with either a txt or csv extension.')
-            fileName = fileName + '.csv'
-            model_results.to_csv(os.path.join(out_dir,fileName), index=False)
+            if 'txt' in fileName:
+                model_results.to_csv(save_path, sep='\t')
+            elif 'csv' in fileName:
+                model_results.to_csv(save_path, index=False)
+            else:
+                # print('Please specify a file name with either a txt or csv extension.')
+                fileName = fileName + '.csv'
+                model_results.to_csv(save_path, index=False)
     
     def parse_hyperparameters(self, trial, config):
         params = {}
@@ -119,6 +127,9 @@ class SurvivalModelPipeline():
         if config is None:
             raise ValueError("No hyperparameter search space provided. Set `config` or `self.hyperparameters`.")
         
+        if self.modelString == "rsf" and n_samples == 10000:
+            config['n_estimators'] = {'n_estimators': {'type': 'categorical', 'choices': [100]}}
+            
         # Extract already optimized hyperparameters and prepare new hyperparameter search grid
         successful_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
         fixed_params = study.best_params if len(successful_trials) >= trial_threshold else {}
@@ -145,6 +156,9 @@ class SurvivalModelPipeline():
         
         
     def train(self, X_train, y_train, X_test, y_test):
+        
+        print(f"[DEBUG] Starting RSF training on {X_train.shape[0]} samples, {X_train.shape[1]} features")
+        
         # =================== Train Model ====================
         model = self._create_model(**self.best_params)
         start = time.time()
@@ -179,6 +193,7 @@ class SurvivalModelPipeline():
                            splits_per_size=[3,5,5,10,10,10],
                            trials_per_size=[20,20,20,20,20,20],
                            trial_threshold=20,
+                           run_seeds=None, ## update 7/28 (YD): specify seeds for iterations
                            n_jobs=1,
                            is_tune=False,
                            is_save=False,
@@ -189,8 +204,14 @@ class SurvivalModelPipeline():
             
             print(f"Running for training size N={n}...")
             
+            # Optionally select custom seeds
+            seeds = run_seeds if run_seeds is not None else list(range(runs))
+            if len(seeds) != runs:
+                print("Length of run_seeds must match number of runs. Use default seeds.")
+                seeds = list(range(runs))
+            
             run_time, run_train_cind, run_test_cind, run_train_brier, run_test_brier = [],[],[],[],[]
-            for run in range(runs):
+            for run in seeds:
                 train_sub, _ = train_test_split(self.train_df, train_size=n, 
                                                 stratify=self.train_df[[self.status_col, self.batch_col]],
                                                 shuffle=True, random_state=run)
@@ -200,7 +221,7 @@ class SurvivalModelPipeline():
                                                 shuffle=True, random_state=run)
                 
                 if run == 0:
-                    if is_tune:     
+                    if is_tune:    
                         self.tune_hyperparameters(
                             train_sub, n_samples=n, n_splits=splits, n_trials=n_trials, 
                             trial_threshold=trial_threshold, n_jobs=n_jobs
@@ -227,6 +248,12 @@ class SurvivalModelPipeline():
                         best_params.update(self.param_override)
                         print(f"Final parameter set after override: %s", best_params)
                 
+                # Hard Override of n_estimators for RSF for large subsets
+                if self.modelString == "rsf" and n > 5000:
+                    if hasattr(self, "best_params"):
+                        self.best_params["n_estimators"] = 50
+                        print(f"[INFO] Overriding RSF n_estimators={self.best_params['n_estimators']} for n={n}")
+
                 ### NOTE: conversion to scikitsurv format assumes no batch.id column
                 X_train, y_train = dataframe_to_scikitsurv_ds(train_sub.drop(columns=self.batch_col))
                 X_test, y_test = dataframe_to_scikitsurv_ds(test_sub.drop(columns=self.batch_col))
@@ -296,7 +323,7 @@ class RandomSurvivalForestModel(SurvivalModelPipeline):
         self.modelString = 'rsf'
         if self.hyperparameters is None:
             self.hyperparameters = {
-                'n_estimators': {'type': 'categorical', 'choices': [100, 500, 1000]},
+                'n_estimators': {'type': 'categorical', 'choices': [500, 1000]},
                 # 'max_depth': {'type': 'int', 'low': 3, 'high': 10},
                 'min_samples_split': {'type': 'int', 'low': 3, 'high': 15}
             }

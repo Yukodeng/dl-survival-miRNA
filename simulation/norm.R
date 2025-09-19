@@ -94,6 +94,7 @@ norm.DESeq <- function(raw, groups=rep(1, ncol(raw))) {
          call. = FALSE
     )
   }
+  raw <- as.data.frame(raw)
   condition <- data.frame(SampleName = colnames(raw), Condition = factor(groups))
   rownames(condition) = colnames(raw)
   dat.DGE <- DESeq2::DESeqDataSetFromMatrix(countData = raw, colData = condition, design = ~ 1)

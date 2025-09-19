@@ -97,12 +97,14 @@ def concordance_td(durations, events, surv, surv_idx, method='adj_antolini'):
     if method == 'adj_antolini':
         is_concordant = _is_concordant
         is_comparable = _is_comparable
+        ## update 07/21/2025 (YD): also return total number of comparable pairs 
         return (_sum_concordant_disc(surv, durations, events, surv_idx, is_concordant) /
-                _sum_comparable(durations, events, is_comparable))
+                _sum_comparable(durations, events, is_comparable)), _sum_comparable(durations, events, is_comparable)
     elif method == 'antolini':
         is_concordant = _is_concordant_antolini
         is_comparable = _is_comparable_antolini
+        ## update 07/21/2025 (YD): also return total number of comparable pairs 
         return (_sum_concordant_disc(surv, durations, events, surv_idx, is_concordant) /
-                _sum_comparable(durations, events, is_comparable))
+                _sum_comparable(durations, events, is_comparable)), _sum_comparable(durations, events, is_comparable)
     return ValueError(f"Need 'method' to be e.g. 'antolini', got '{method}'.")
 

@@ -132,7 +132,7 @@ def main(config_path):
         batchNormType=config['batchNormType'],
         dataName=config['dataName'],
         hyperparameters=config['hyperparameters'],
-        is_stratified=config.get('stratified', True),
+        is_stratified=config.get('stratified', False),
         storage_url=config['storage_url']
     )
     if "param_override" in config:

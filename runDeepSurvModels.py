@@ -119,7 +119,7 @@ class DeepSurvPipeline():
         os.makedirs(out_dir, exist_ok=True)
         
         # save results as txt or csv file
-        today = datetime.now().strftime("%Y%m%d")
+        today = datetime.now().strftime("%m%d%y")
         fileName = f'model_results_{today}.csv' if fileName is None else fileName
         
         if 'txt' in fileName:
@@ -306,8 +306,8 @@ class DeepSurvPipeline():
             tr_c_index  = tr_ev.stratified_concordance_td(batch_indices=batch_ids_train) 
             val_c_index = val_ev.stratified_concordance_td(batch_indices=batch_ids_val) 
         else:
-            tr_c_index  = tr_ev.concordance_td() 
-            val_c_index = val_ev.concordance_td() 
+            tr_c_index, _  = tr_ev.concordance_td() 
+            val_c_index, _ = val_ev.concordance_td() 
         
         # Integrated Brier score -----------
         min_surv = np.ceil(max(np.min(durations_train_np), np.min(durations_val_np)))
