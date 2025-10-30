@@ -468,7 +468,7 @@ sim.survdata <- function(surv.data,
     x.train = log(x.train.count+0.5)
   }
   
-  # [!UNCOMMENT] ----
+  ## [!UNCOMMENT] ----
   # cor.surv.batch.tr.05 = cor(t.train[id.new], apply(batch.obs.sorted, 1, median))
   # cor.surv.batch.tr.01 = cor(t.train[id.new], apply(batch.obs.sorted, 1, median))
   # cor.surv.batch.tr.0 = cor(t.train[id.new], apply((log(batch.train+0.5) - xtrue.train.log), 1, median)) 
@@ -555,7 +555,7 @@ sim.survdata <- function(surv.data,
     x.test = log(x.test.count+0.5)
   }
   
-  # [!UNCOMMENT] ----
+  ## [!UNCOMMENT] ----
   # cor.surv.batch.te.05 = cor(t.test[id.new.test], apply(batch.obs.sorted,1, median))
   # cor.surv.batch.te.01 = cor(t.test[id.new.test], apply(batch.obs.sorted, 1, median))
   # cor.surv.batch.te.0 = cor(t.test[id.new.test], apply(batch.obs %>% select(-batch_id), 1, median))
@@ -801,7 +801,7 @@ sim.survdata <- function(surv.data,
         x0_train = data_train[,selected.geneid]
         x0_test  = data_test[, selected.geneid]
 
-        # [!UNCOMMENT] TEMP FOR N=2000 LASSO RERUN ----
+        ## [!UNCOMMENT] TEMP FOR Stratified-LASSO RERUN ----
         # ## Non-stratified analysis -------------------------------------
         # 
         # ### Oracle (linear) analysis -------------------------------
@@ -898,62 +898,62 @@ sim.survdata <- function(surv.data,
         #     run_c_nl_test[length(run_c_nl_test)+1] =
         #     c_nl_test[length(c_nl_test)+1] = NA
         # }
-        # 
-        # 
-        # ### Penalized Lasso -------------------------------------
-        # 
-        # # NOTE: reinclude univar filtering but allow more markers to be selected ----
-        # # ## Univariate filtering
-        # # lkhd_u = rep(0, ncol(x_train))
-        # # for(j in 1:length(lkhd_u)){
-        # #   coxfit_ui=coxph(Surv(data_train$time, data_train$status) ~ as.matrix(x_train[,j]))
-        # #   if(!is.na(coef(coxfit_ui)) & abs(coef(coxfit_ui))<20){
-        # #     lkhd_u[j]=coxfit_ui$loglik[2]
-        # #   }else{
-        # #     lkhd_u[j]=-10000
-        # #   }
-        # # }
-        # # lkhd_p_sort=sort(lkhd_u, decreasing=TRUE)
-        # # lkhd_p_thres=lkhd_p_sort[round(min(sum(data_train$status)/10, ncol(x_train)/4))]
-        # 
-        # cv_l = cv.glmnet(
-        #   as.matrix(x_train),
-        #   # as.matrix(x_train[,lkhd_u >= lkhd_p_thres]),
-        #   Surv(data_train$time, data_train$status),
-        #   nfolds=n_splits,
-        #   family="cox",
-        #   alpha=1, # Lasso
-        #   standardize=F
-        #   )
-        # lambda_min = cv_l$lambda.min
-        # l_l[length(l_l)+1] = lambda_min
-        # 
-        # # Fit final lasso regression
-        # glmnet_l = glmnet(
-        #   as.matrix(x_train),
-        #   # as.matrix(x_train[,lkhd_u >= lkhd_p_thres]),
-        #   Surv(data_train$time, data_train$status),
-        #   family="cox", alpha=1, lambda=lambda_min,
-        #   standardize=F
-        #   )
-        # 
-        # # Train score
-        # lp_train = predict(glmnet_l, newx = as.matrix(x_train), #as.matrix(x_train[,lkhd_u>=lkhd_p_thres]),
-        #                    s=lambda_min, type="link")
-        # c_l[length(c_l)+1] = run_c_l[length(run_c_l)+1] =
-        #   survcomp::concordance.index(x=lp_train, surv.time=data_train$time, surv.event=data_train$status)$c.index
-        # 
-        # # Test score
-        # lp_test = predict(glmnet_l, newx = as.matrix(x_test), #as.matrix(x_test[,lkhd_u>=lkhd_p_thres]),
-        #                   s=lambda_min, type="link")
-        # c_l_test[length(c_l_test)+1] = run_c_l_test[length(run_c_l_test)+1] =
-        #   survcomp::concordance.index(x=lp_test, surv.time=data_test$time, surv.event=data_test$status)$c.index
+         
+         
+        ### Penalized Lasso -------------------------------------
+
+        # NOTE: reinclude univar filtering but allow more markers to be selected ----
+        # ## Univariate filtering
+        # lkhd_u = rep(0, ncol(x_train))
+        # for(j in 1:length(lkhd_u)){
+        #   coxfit_ui=coxph(Surv(data_train$time, data_train$status) ~ as.matrix(x_train[,j]))
+        #   if(!is.na(coef(coxfit_ui)) & abs(coef(coxfit_ui))<20){
+        #     lkhd_u[j]=coxfit_ui$loglik[2]
+        #   }else{
+        #     lkhd_u[j]=-10000
+        #   }
+        # }
+        # lkhd_p_sort=sort(lkhd_u, decreasing=TRUE)
+        # lkhd_p_thres=lkhd_p_sort[round(min(sum(data_train$status)/10, ncol(x_train)/4))]
+
+        cv_l = cv.glmnet(
+          as.matrix(x_train),
+          # as.matrix(x_train[,lkhd_u >= lkhd_p_thres]),
+          Surv(data_train$time, data_train$status),
+          nfolds=n_splits,
+          family="cox",
+          alpha=1, # Lasso
+          standardize=F
+          )
+        lambda_min = cv_l$lambda.min
+        l_l[length(l_l)+1] = lambda_min
+
+        # Fit final lasso regression
+        glmnet_l = glmnet(
+          as.matrix(x_train),
+          # as.matrix(x_train[,lkhd_u >= lkhd_p_thres]),
+          Surv(data_train$time, data_train$status),
+          family="cox", alpha=1, lambda=lambda_min,
+          standardize=F
+          )
+
+        # Train score
+        lp_train = predict(glmnet_l, newx = as.matrix(x_train), #as.matrix(x_train[,lkhd_u>=lkhd_p_thres]),
+                           s=lambda_min, type="link")
+        c_l[length(c_l)+1] = run_c_l[length(run_c_l)+1] =
+          survcomp::concordance.index(x=lp_train, surv.time=data_train$time, surv.event=data_train$status)$c.index
+
+        # Test score
+        lp_test = predict(glmnet_l, newx = as.matrix(x_test), #as.matrix(x_test[,lkhd_u>=lkhd_p_thres]),
+                          s=lambda_min, type="link")
+        c_l_test[length(c_l_test)+1] = run_c_l_test[length(run_c_l_test)+1] =
+          survcomp::concordance.index(x=lp_test, surv.time=data_test$time, surv.event=data_test$status)$c.index
 
 
         ## Stratified analysis -----------------------------------------
         if(stratify == 1) {
           
-          # [!UNCOMMENT] TEMP FOR N=2000 LASSO RERUN ----
+          ## [!UNCOMMENT] TEMP FOR N=2000 LASSO RERUN ----
           # ### Oracle (linear) ----------------------------------
           # 
           # # Train
@@ -1149,7 +1149,7 @@ sim.survdata <- function(surv.data,
 
     ### Save model results ------------
    
-    ### [!UNCOMMENT] TEMP FOR N=2000 LASSO RERUN ---
+    ### [!UNCOMMENT] TEMP FOR N=2000 LASSO RERUN ----
     modelList = c('ls')
     # modelList = c('o','nl', 'l')
     # if (stratify==1) { modelList = c(modelList, c('os','nls','ls')) }
@@ -1179,16 +1179,12 @@ sim.survdata <- function(surv.data,
                                  'train C' = cobj,
                                  'test C'  = cobj_test)
       write.csv(model_results,
-                ### [!UNCOMMENT] TEMP FOR N=2000 LASSO RERUN ---
-                # file.path(results.dir, paste0("model_results_rerun_100",date,".csv")),
                 file.path(results.dir, paste0("model_results_", date,".csv")),
                 row.names=F)
 
       if (model %in% c("l","ls")){
         lobj=eval(parse(text=paste0("l_", model)))
         write.csv(lobj,
-                  ### [!UNCOMMENT] TEMP FOR N=2000 LASSO RERUN ---
-                  # file.path(results.dir, paste0("lambda_min_rerun_100_", date,".csv")),
                   file.path(results.dir, paste0("lambda_min_", date,".csv")),
                   row.names=F)
       }
