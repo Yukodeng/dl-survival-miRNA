@@ -8,6 +8,7 @@ from datetime import datetime
 import optuna
 from utils import dataframe_to_scikitsurv_ds
 from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.preprocessing import OneHotEncoder
 from sksurv.metrics import integrated_brier_score
 from sksurv.linear_model import CoxnetSurvivalAnalysis
 from sksurv.svm import FastKernelSurvivalSVM
@@ -19,6 +20,7 @@ class SurvivalModelPipeline():
                 test_df,
                 batchNormType,
                 dataName,
+                is_stratified=False,
                 hyperparameters=None,
                 test_size=1000,
                 time_col='time', status_col='status', batch_col="batch.id",
@@ -35,7 +37,8 @@ class SurvivalModelPipeline():
         self.hyperparameters = hyperparameters
         self.storage_url = storage_url
         self.best_params = {}
-    
+        self.is_stratified = is_stratified
+        
     
     def _create_model(self, **kwargs):
         raise NotImplementedError
@@ -127,8 +130,8 @@ class SurvivalModelPipeline():
         if config is None:
             raise ValueError("No hyperparameter search space provided. Set `config` or `self.hyperparameters`.")
         
-        if self.modelString == "rsf" and n_samples == 10000:
-            config['n_estimators'] = {'n_estimators': {'type': 'categorical', 'choices': [100]}}
+        if "rsf" in self.modelString and n_samples > 5000:
+            config['n_estimators'] = {'n_estimators': {'type': 'categorical', 'choices': [50]}}
             
         # Extract already optimized hyperparameters and prepare new hyperparameter search grid
         successful_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
@@ -157,7 +160,7 @@ class SurvivalModelPipeline():
         
     def train(self, X_train, y_train, X_test, y_test):
         
-        print(f"[DEBUG] Starting RSF training on {X_train.shape[0]} samples, {X_train.shape[1]} features")
+        print(f"[DEBUG] Starting {self.modelString} training on {X_train.shape[0]} samples, {X_train.shape[1]} features")
         
         # =================== Train Model ====================
         model = self._create_model(**self.best_params)
@@ -191,12 +194,13 @@ class SurvivalModelPipeline():
                            subset_sizes=[100,500,1000,2000,5000,10000],
                            runs_per_size=[20,20,20,20,20,20],
                            splits_per_size=[3,5,5,10,10,10],
-                           trials_per_size=[20,20,20,20,20,20],
-                           trial_threshold=20,
+                           trials_per_size=[30,30,30,30,30,30],
+                           trial_threshold=30,
                            run_seeds=None, ## update 7/28 (YD): specify seeds for iterations
                            n_jobs=1,
                            is_tune=False,
                            is_save=False,
+                           out_dir=None,
                            fileName="model_results.csv"):
         
         model_results = []
@@ -249,15 +253,32 @@ class SurvivalModelPipeline():
                         print(f"Final parameter set after override: %s", best_params)
                 
                 # Hard Override of n_estimators for RSF for large subsets
-                if self.modelString == "rsf" and n > 5000:
+                if "rsf" in self.modelString and n > 5000:
                     if hasattr(self, "best_params"):
                         self.best_params["n_estimators"] = 50
                         print(f"[INFO] Overriding RSF n_estimators={self.best_params['n_estimators']} for n={n}")
-
-                ### NOTE: conversion to scikitsurv format assumes no batch.id column
-                X_train, y_train = dataframe_to_scikitsurv_ds(train_sub.drop(columns=self.batch_col))
-                X_test, y_test = dataframe_to_scikitsurv_ds(test_sub.drop(columns=self.batch_col))
-                
+                            
+                ### NOTE: implement naive approach of batch stratification by including batch.id as predictor
+                if self.is_stratified:
+                    encoder = OneHotEncoder(sparse_output=False)
+                    
+                    train_batch_cols = pd.DataFrame(encoder.fit_transform(train_sub[[self.batch_col]]),
+                                                    index=train_sub.index, 
+                                                    columns=encoder.get_feature_names_out([self.batch_col]))
+                    train_sub = pd.concat([train_batch_cols, train_sub.drop(columns=self.batch_col)], axis=1)
+                    
+                    test_batch_cols = pd.DataFrame(encoder.fit_transform(test_sub[[self.batch_col]]),
+                                                    index=test_sub.index, 
+                                                    columns=encoder.get_feature_names_out([self.batch_col]))
+                    test_sub = pd.concat([test_batch_cols, test_sub.drop(columns=self.batch_col)], axis=1)
+                    
+                    X_train, y_train = dataframe_to_scikitsurv_ds(train_sub)
+                    X_test, y_test = dataframe_to_scikitsurv_ds(test_sub)
+                    
+                else: 
+                    X_train, y_train = dataframe_to_scikitsurv_ds(train_sub.drop(columns=self.batch_col))
+                    X_test, y_test = dataframe_to_scikitsurv_ds(test_sub.drop(columns=self.batch_col))
+                    
                 duration, tr_cind, te_cind, tr_brier, te_brier = self.train(X_train, y_train, X_test, y_test)
                 model_results.append({
                     "n train": n,
@@ -285,7 +306,7 @@ class SurvivalModelPipeline():
         
         model_results = pd.DataFrame(model_results)  
         if is_save:
-            self.write(model_results=model_results, fileName=fileName)
+            self.write(model_results=model_results, out_dir=out_dir,fileName=fileName)
                 
         return model_results
 
@@ -293,12 +314,14 @@ class SurvivalModelPipeline():
 class CoxPHElasticNetModel(SurvivalModelPipeline):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.modelString = 'coxnet'
+        self.modelString = "%scoxnet" % (['','stratified-'][self.is_stratified])
+        
         if self.hyperparameters is None:
             self.hyperparameters = {
                 # 'alphas': {'type': 'categorical', 'choices': [[2.0**i] for i in np.arange(-6, 3, 2)]},
                 'l1_ratio': {'type': 'float', 'low': 0.1, 'high': 1.0}
             }
+            
     def _create_model(self, **kwargs):
         return CoxnetSurvivalAnalysis(fit_baseline_model=True, **kwargs)
 
@@ -306,13 +329,15 @@ class CoxPHElasticNetModel(SurvivalModelPipeline):
 class SVMSurvivalModel(SurvivalModelPipeline):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.modelString = 'svm'
+        self.modelString = "%ssvm" % (['','stratified-'][self.is_stratified])    
+            
         if self.hyperparameters is None:
             self.hyperparameters = {
                 'alpha': {'type': 'float', 'low': 2.0**-5, 'high': 2.0**5, 'log': True},
                 'kernel': {'type': 'categorical', 'choices': ['linear', 'poly', 'rbf']},
                 'rank_ratio': {'type': 'float', 'low': 0.0, 'high': 1.0}
             }
+            
     def _create_model(self, **kwargs):
         return FastKernelSurvivalSVM(**kwargs)
 
@@ -320,26 +345,30 @@ class SVMSurvivalModel(SurvivalModelPipeline):
 class RandomSurvivalForestModel(SurvivalModelPipeline):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.modelString = 'rsf'
+        self.modelString = "%srsf" % (['','stratified-'][self.is_stratified])
+        
         if self.hyperparameters is None:
             self.hyperparameters = {
-                'n_estimators': {'type': 'categorical', 'choices': [500, 1000]},
+                'n_estimators': {'type': 'categorical', 'choices': [100, 500]},
                 # 'max_depth': {'type': 'int', 'low': 3, 'high': 10},
                 'min_samples_split': {'type': 'int', 'low': 3, 'high': 15}
             }
+            
     def _create_model(self, **kwargs):
         return RandomSurvivalForest(**kwargs)
 
 class GradientBoostingSurvivalModel(SurvivalModelPipeline):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.modelString = 'gb'
+        self.modelString = "%sgb" % (['','stratified-'][self.is_stratified])
+        
         if self.hyperparameters is None:
             self.hyperparameters = {
                 'learning_rate': {'type': 'float', 'low': 0.001, 'high': 1},
-                'n_estimators': {'type': 'categorical', 'choices': [100, 500, 1000]},
+                'n_estimators': {'type': 'categorical', 'choices': [100, 500]},
                 # 'max_depth': {'type': 'int', 'low': 3, 'high': 10},
                 'min_samples_split': {'type': 'int', 'low': 3, 'high': 150}
             }
+            
     def _create_model(self, **kwargs):
         return GradientBoostingSurvivalAnalysis(**kwargs)

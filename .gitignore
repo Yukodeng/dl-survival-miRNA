@@ -1,6 +1,4 @@
 # folders
-DeepSurv/
-deepsurvTorch/
 archive/
 __pycache__/
 logs/
@@ -11,6 +9,7 @@ results/
 weight_checkpoint_*
 *.db
 *.pkl
+*.log
 
 # scripts
 *.sh
@@ -20,15 +19,8 @@ slurm-temp.log
 # data
 raw-data/
 data/
+models/
 !beta0.csv
 !augmentation_miRNA_names_538.csv
-!test_ids_10000.txt
-simulate_survival*.csv
-MSKpair_*.csv
-# !MSKpair_miRNA_names.csv
-# !MSKpair_MXF_merge.csv
-# !MSKpair_PMFH_merge.csv
-# *maf_generated.csv
-simulation/batch_effect/
 # simulation/batch_effect/results/
 # !simulation/batch_effect/results/organized/

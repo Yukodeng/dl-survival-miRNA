@@ -48,7 +48,8 @@ def main(args):
         train_df=train_df,
         test_df=test_df,
         batchNormType=args.batchNormType,
-        dataName=args.dataName
+        dataName=args.dataName,
+        is_stratified=args.is_stratified
     )
     
     # Run training pipeline
@@ -88,6 +89,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_jobs", type=int, help="Number of parallel jobs for Optuna (default 1)", default=1)
     parser.add_argument("--is_tune", action="store_true", help="Enable hyperparameter tuning with optuna (default: False)", default=False)
     parser.add_argument("--is_save", action="store_true", help="Save results to file (default: False)", default=False)
+    parser.add_argument("--is_stratified", action="store_true", help="Fit batch-stratified models by inputting batch labels", default=False)
     parser.add_argument("--fileName", type=str, default=None, help="Output file name")
     parser.add_argument("--keywords", type=str, default="", help="Keywords for input file search, comma-separated (optional)")
     parser.add_argument("--keep_batch", action="store_true", help="Keep batch column when loading input data", default=True)

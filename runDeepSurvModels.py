@@ -284,7 +284,6 @@ class DeepSurvPipeline():
         duration = round(stop - start, 2)
         
         # ==================== Evaluation ====================
-        _ = model.compute_baseline_hazards(input=x_train, target=(durations_train, events_train))   
         
         # Convert torch tensors back to numpy objects for evaluation
         x_train_np = x_train.detach().cpu().numpy()
@@ -294,17 +293,27 @@ class DeepSurvPipeline():
         durations_val_np   = durations_val.detach().cpu().numpy()
         events_train_np    = events_train.detach().cpu().numpy()
         events_val_np      = events_val.detach().cpu().numpy()
+        batch_ids_train_np = batch_ids_train.detach().cpu().numpy()
+        batch_ids_val_np   = batch_ids_val.detach().cpu().numpy()
         
-        # Initialize EvalSurv objects 
-        tr_surv  = model.predict_surv_df(x_train_np)
-        val_surv = model.predict_surv_df(x_val_np)
+        # Compute baseline hazards (single stratum or per-batch)
+        if self.is_stratified:
+            _ = model.compute_baseline_hazards(input=x_train, target=(durations_train, events_train),batch_ids=batch_ids_val_np)   
+            tr_surv  = model.predict_surv_df(x_train_np, batch_ids=batch_ids_train_np)
+            val_surv = model.predict_surv_df(x_val_np, batch_ids=batch_ids_val_np)
+        else:
+            _ = model.compute_baseline_hazards(input=x_train, target=(durations_train, events_train)) 
+            tr_surv  = model.predict_surv_df(x_train_np)
+            val_surv = model.predict_surv_df(x_val_np)  
+            
+         # Initialize EvalSurv objects 
         tr_ev = EvalSurv(tr_surv, durations_train_np, events_train_np, censor_surv='km')
         val_ev = EvalSurv(val_surv, durations_val_np, events_val_np, censor_surv='km')
         
         # Concordance index ----------------
         if self.is_stratified:
             tr_c_index  = tr_ev.stratified_concordance_td(batch_indices=batch_ids_train) 
-            val_c_index = val_ev.stratified_concordance_td(batch_indices=batch_ids_val) 
+            val_c_index = val_ev.stratified_concordance_td(batch_indices=batch_ids_val_np) 
         else:
             tr_c_index, _  = tr_ev.concordance_td() 
             val_c_index, _ = val_ev.concordance_td() 
@@ -457,6 +466,7 @@ class DeepSurvPipeline():
                            n_jobs=1,
                            is_tune=False,
                            is_save=False,
+                           out_dir=None,
                            fileName="model_results.csv"):
         
         n_train, model_time, model_train_cind, model_test_cind, model_train_brier, model_test_brier = [],[],[],[],[],[]
@@ -556,6 +566,6 @@ class DeepSurvPipeline():
         })
         
         if is_save:
-            self.write(model_results=model_results, fileName=fileName)
+            self.write(model_results=model_results, out_dir=out_dir, fileName=fileName)
             
         return model_results

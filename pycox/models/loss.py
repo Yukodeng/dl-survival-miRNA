@@ -20,7 +20,7 @@ def cox_ph_loss_sorted(log_h: Tensor, events: Tensor, eps: float = 1e-7) -> Tens
     where h = exp(log_h) are the hazards and R is the risk set, and d is event.
 
     We just compute a cumulative sum, and not the true Risk sets. This is a
-    limitation, but simple and fast.
+    limitati`on, but simple and fast.
     """
     if events.dtype is torch.bool:
         events = events.float()

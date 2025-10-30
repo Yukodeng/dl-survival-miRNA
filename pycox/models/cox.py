@@ -59,8 +59,9 @@ class _CoxBase(base.SurvBase):
         return super().fit(input, target, batch_size, epochs, callbacks, verbose,
                            num_workers, shuffle, metrics, val_data, val_batch_size,
                            **kwargs)
-
-    def _compute_baseline_hazards(self, input, df, max_duration, batch_size, eval_=True, num_workers=0):
+    
+    # [UPDATE 10/27] Add argument batch_id to allow different baseline hazard calculation for stratified NN 
+    def _compute_baseline_hazards(self, input, df, batch_ids, max_duration, batch_size, eval_=True, num_workers=0):
         raise NotImplementedError
 
     def target_to_df(self, target):
@@ -68,7 +69,7 @@ class _CoxBase(base.SurvBase):
         df = pd.DataFrame({self.duration_col: durations, self.event_col: events}) 
         return df
 
-    def compute_baseline_hazards(self, input=None, target=None, max_duration=None, sample=None, batch_size=8224,
+    def compute_baseline_hazards(self, input=None, target=None, batch_ids=None, max_duration=None, sample=None, batch_size=8224,
                                 set_hazards=True, eval_=True, num_workers=0):
         """Computes the Breslow estimates form the data defined by `input` and `target`
         (if `None` use training data).
@@ -91,57 +92,75 @@ class _CoxBase(base.SurvBase):
             if not hasattr(self, 'training_data'):
                 raise ValueError("Need to give a 'input' and 'target' to this function.")
             input, target = self.training_data
+            
         df = self.target_to_df(target)#.sort_values(self.duration_col)
         if sample is not None:
             if sample >= 1:
                 df = df.sample(n=sample)
             else:
                 df = df.sample(frac=sample)
+                
         input = tt.tuplefy(input).to_numpy().iloc[df.index.values]
-        base_haz = self._compute_baseline_hazards(input, df, max_duration, batch_size,
+        # update 10/27: add batch ids
+        batch_ids = batch_ids[df.index.values] if batch_ids is not None else np.repeat(1, len(df))
+        base_haz = self._compute_baseline_hazards(input, df, batch_ids, max_duration, batch_size,
                                                   eval_=eval_, num_workers=num_workers)
         if set_hazards:
             self.compute_baseline_cumulative_hazards(set_hazards=True, baseline_hazards_=base_haz)
         return base_haz
 
-    def compute_baseline_cumulative_hazards(self, input=None, target=None, max_duration=None, sample=None,
+    def compute_baseline_cumulative_hazards(self, input=None, target=None, batch_ids=None, max_duration=None, sample=None,
                                             batch_size=8224, set_hazards=True, baseline_hazards_=None,
                                             eval_=True, num_workers=0):
         """See `compute_baseline_hazards. This is the cumulative version."""
+        
         if ((input is not None) or (target is not None)) and (baseline_hazards_ is not None):
             raise ValueError("'input', 'target' and 'baseline_hazards_' can not both be different from 'None'.")
         if baseline_hazards_ is None:
-            baseline_hazards_ = self.compute_baseline_hazards(input, target, max_duration, sample, batch_size,
+            baseline_hazards_ = self.compute_baseline_hazards(input, target, batch_ids, max_duration, sample, batch_size,
                                                              set_hazards=False, eval_=eval_, num_workers=num_workers)
-        assert baseline_hazards_.index.is_monotonic_increasing,\
+        
+        assert all([bh.index.is_monotonic_increasing for bh in baseline_hazards_.values()]),\
             'Need index of baseline_hazards_ to be monotonic increasing, as it represents time.'
-        bch = (baseline_hazards_
-                .cumsum()
-                .rename('baseline_cumulative_hazards'))
+            
+        bch = {k: bh.cumsum().rename('baseline_cumulative_hazards') for k, bh in baseline_hazards_.items()}
+        # bch = (baseline_hazards_
+        #         .cumsum()
+        #         .rename('baseline_cumulative_hazards'))
+        
         if set_hazards:
             self.baseline_hazards_ = baseline_hazards_
             self.baseline_cumulative_hazards_ = bch
+            
         return bch
 
-    def predict_cumulative_hazards(self, input, max_duration=None, batch_size=8224, verbose=False,
+
+    def predict_cumulative_hazards(self, input, batch_id=None, max_duration=None, batch_size=8224, verbose=False,
                                    baseline_hazards_=None, eval_=True, num_workers=0):
         """See `predict_survival_function`."""
+        
         if type(input) is pd.DataFrame:
             input = self.df_to_input(input)
         if baseline_hazards_ is None:
             if not hasattr(self, 'baseline_hazards_'):
                 raise ValueError('Need to compute baseline_hazards_. E.g run `model.compute_baseline_hazards()`')
             baseline_hazards_ = self.baseline_hazards_
-        assert baseline_hazards_.index.is_monotonic_increasing,\
+            
+        if batch_id is None:
+            raise ValueError("Need to specify `batch_id` to select the correct baseline hazard")
+        
+        assert baseline_hazards_[batch_id].index.is_monotonic_increasing,\
             'Need index of baseline_hazards_ to be monotonic increasing, as it represents time.'
-        return self._predict_cumulative_hazards(input, max_duration, batch_size, verbose, baseline_hazards_,
+            
+        return self._predict_cumulative_hazards(input, max_duration, batch_size, verbose, baseline_hazards_[batch_id],
                                                 eval_, num_workers=num_workers)
 
     def _predict_cumulative_hazards(self, input, max_duration, batch_size, verbose, baseline_hazards_,
                                     eval_=True, num_workers=0):
         raise NotImplementedError
 
-    def predict_surv_df(self, input, max_duration=None, batch_size=8224, verbose=False, baseline_hazards_=None,
+
+    def predict_surv_df(self, input, batch_id=None, max_duration=None, batch_size=8224, verbose=False, baseline_hazards_=None,
                         eval_=True, num_workers=0):
         """Predict survival function for `input`. S(x, t) = exp(-H(x, t))
         Require computed baseline hazards.
@@ -159,10 +178,11 @@ class _CoxBase(base.SurvBase):
         Returns:
             pd.DataFrame -- Survival estimates. One columns for each individual.
         """
-        return np.exp(-self.predict_cumulative_hazards(input, max_duration, batch_size, verbose, baseline_hazards_,
-                                                       eval_, num_workers))
+        cum_haz = self.predict_cumulative_hazards(input, batch_id, max_duration, batch_size, verbose, baseline_hazards_,
+                                                  eval_, num_workers)
+        return np.exp(-cum_haz)
 
-    def predict_surv(self, input, max_duration=None, batch_size=8224, numpy=None, verbose=False,
+    def predict_surv(self, input, batch_id=None, max_duration=None, batch_size=8224, numpy=None, verbose=False,
                      baseline_hazards_=None, eval_=True, num_workers=0):
         """Predict survival function for `input`. S(x, t) = exp(-H(x, t))
         Require compueted baseline hazards.
@@ -182,7 +202,7 @@ class _CoxBase(base.SurvBase):
         Returns:
             pd.DataFrame -- Survival estimates. One columns for each individual.
         """
-        surv = self.predict_surv_df(input, max_duration, batch_size, verbose, baseline_hazards_,
+        surv = self.predict_surv_df(input, batch_id, max_duration, batch_size, verbose, baseline_hazards_,
                                     eval_, num_workers)
         surv = torch.from_numpy(surv.values.transpose())
         return tt.utils.array_or_tensor(surv, numpy, input)
@@ -229,36 +249,93 @@ class _CoxBase(base.SurvBase):
     
 
 class _CoxPHBase(_CoxBase):
-    def _compute_baseline_hazards(self, input, df_target, max_duration, batch_size, eval_=True, num_workers=0):
+    def _compute_baseline_hazards(self, input, df_target, batch_ids=None, max_duration=None,
+                                  batch_size=8224, eval_=True, num_workers=0):
+                                 # self, input, df_target, max_duration, batch_size, batch_ids=None, eval_=True, num_workers=0):
         if max_duration is None:
             max_duration = np.inf
+            
+        # Compute exp(log-risk)
+        expg = np.exp(self.predict(input, batch_size, True, eval_, num_workers=num_workers)).flatten()
+        df_target = df_target.assign(expg=expg)
+        
+        # --------------- Non-stratified version ----------------
+        if batch_ids is None:
+            # Here we are computing when expg when there are no events.
+            #   Could be made faster, by only computing when there are events.
+            return  (df_target
+                        .groupby(self.duration_col)
+                        .agg({'expg': 'sum', self.event_col: 'sum'})
+                        .sort_index(ascending=False)
+                        .assign(expg=lambda x: x['expg'].cumsum())
+                        .pipe(lambda x: x[self.event_col] / x['expg'])
+                        .fillna(0.)
+                        .iloc[::-1]
+                        .loc[lambda x: x.index <= max_duration]
+                        .rename('baseline_hazards'))
+        
+        # ----------- Stratified version (per batch) ------------
 
-        # Here we are computing when expg when there are no events.
-        #   Could be made faster, by only computing when there are events.
-        return (df_target
-                .assign(expg=np.exp(self.predict(input, batch_size, True, eval_, num_workers=num_workers)))
-                .groupby(self.duration_col)
-                .agg({'expg': 'sum', self.event_col: 'sum'})
-                .sort_index(ascending=False)
-                .assign(expg=lambda x: x['expg'].cumsum())
-                .pipe(lambda x: x[self.event_col]/x['expg'])
-                .fillna(0.)
-                .iloc[::-1]
-                .loc[lambda x: x.index <= max_duration]
-                .rename('baseline_hazards'))
+        batch_ids = np.asarray(batch_ids)
+        unique_batches = np.unique(batch_ids)
+        baseline_hazards_dict = {}
+
+        for b in unique_batches:
+            mask = (batch_ids == b)
+            df_b = df_target.loc[mask]
+            if df_b[self.event_col].sum() == 0:
+                continue  # skip strata with no events
+
+            base_haz_b = (
+                df_b.groupby(self.duration_col)
+                    .agg({'expg': 'sum', self.event_col: 'sum'})
+                    .sort_index(ascending=False)
+                    .assign(expg=lambda x: x['expg'].cumsum())
+                    .pipe(lambda x: x[self.event_col] / x['expg'])
+                    .fillna(0.)
+                    .iloc[::-1]
+                    .loc[lambda x: x.index <= max_duration]
+                    .rename(f'baseline_hazards_batch_{b}')
+            )
+            baseline_hazards_dict[b] = base_haz_b  
+
+        return baseline_hazards_dict
 
     def _predict_cumulative_hazards(self, input, max_duration, batch_size, verbose, baseline_hazards_,
                                     eval_=True, num_workers=0):
+        '''
+        Predict cumulative hazard H(t|x) for either:
+         - a single baseline hazard (non-stratified)
+         - a batch-specific baseline_hazards_ (if baseline_hazards_ is a dict)
+        '''
         max_duration = np.inf if max_duration is None else max_duration
-        if baseline_hazards_ is self.baseline_hazards_:
-            bch = self.baseline_cumulative_hazards_
-        else:
-            bch = self.compute_baseline_cumulative_hazards(set_hazards=False, 
-                                                           baseline_hazards_=baseline_hazards_)
-        bch = bch.loc[lambda x: x.index <= max_duration]
         expg = np.exp(self.predict(input, batch_size, True, eval_, num_workers=num_workers)).reshape(1, -1)
-        return pd.DataFrame(bch.values.reshape(-1, 1).dot(expg), 
-                            index=bch.index)
+
+        # --------------- Non-stratified version ---------------
+        if isinstance(baseline_hazards_, pd.Series):
+            if baseline_hazards_ is self.baseline_hazards_:
+                bch = self.baseline_cumulative_hazards_
+            else:
+                bch = self.compute_baseline_cumulative_hazards(set_hazards=False, 
+                                                            baseline_hazards_=baseline_hazards_)
+            bch = bch.loc[lambda x: x.index <= max_duration]
+            expg = np.exp(self.predict(input, batch_size, True, eval_, num_workers=num_workers)).reshape(1, -1)
+            return pd.DataFrame(bch.values.reshape(-1, 1).dot(expg), 
+                                index=bch.index)
+        
+        # ----------- Stratified version (per batch) ------------
+        elif isinstance(baseline_hazards_, dict):
+            cumulative_hazards_dict = {}
+            for b, haz in baseline_hazards_.items():
+                bch = haz.cumsum().loc[lambda x: x.index <= max_duration]
+                cumulative_hazards_dict[b] = pd.DataFrame(
+                    bch.values.reshape(-1, 1).dot(expg), index=bch.index
+                )
+            return cumulative_hazards_dict
+
+        else:
+            raise ValueError("Invalid baseline_hazards_ type: expected pd.Series or dict of Series.")
+        
 
     def partial_log_likelihood(self, input, target, g_preds=None, batch_size=8224, eps=1e-7, eval_=True,
                                num_workers=0):
@@ -435,3 +512,63 @@ class CoxPHStratified(_CoxPHBase):
         self.callbacks.on_fit_end()
         
         return self.log
+
+    def predict_surv_df(self, input, batch_ids=None, max_duration=None,
+                        batch_size=8224, verbose=False, baseline_hazards_=None,
+                        eval_=True, num_workers=0):
+        """
+        Predict survival curves. If stratified baselines have been computed,
+        pass `batch_ids` (1D array-like, length = n_samples) to use the
+        correct baseline hazard per stratum. Returns a pd.DataFrame of shape
+        (time_grid x n_samples) with a common time index.
+
+        Backward compatible:
+        - If `batch_ids` is None and a single baseline (pd.Series) is stored, we
+          fall back to _CoxBase.predict_surv_df behavior.
+        - If baseline hazards are a dict (stratified) but batch_ids is None,
+          we raise a clear error.
+        """
+        
+        if baseline_hazards_ is None:
+            if not hasattr(self, 'baseline_hazards_'):
+                raise ValueError("Need to compute baseline hazards. Run `model.compute_baseline_hazards(...)` first.")
+            baseline_hazards_ = self.baseline_hazards_
+            
+        # -------- Non-stratified (use base implementation) ---------
+        if isinstance(baseline_hazards_, pd.Series):
+            
+            return super().predict_surv_df(input, max_duration=max_duration,
+                                           batch_size=batch_size, verbose=verbose,
+                                           baseline_hazards_=baseline_hazards_,
+                                           eval_=eval_, num_workers=num_workers)
+        
+        # Stratified: need batch_ids
+        if not isinstance(baseline_hazards_, dict):
+            raise ValueError("`baseline_hazards_` must be either a pd.Series or a dict of Series.")
+
+        if batch_ids is None:
+            raise ValueError("Stratified prediction requires `batch_ids` for each sample.")
+        
+        
+        expg = np.exp(self.predict(input, batch_size, True, eval_, num_workers=num_workers)).reshape(-1)
+        
+        # Collect all survival times across batches
+        all_times = None
+        per_batch_surv = {}
+        for b, haz in baseline_hazards_.items():
+            bch = haz.cumsum()   # H_0,b(t)
+            per_batch_surv[b] = bch   
+            all_times = bch.index if all_times is None else all_times.union(bch.index)
+        all_times = all_times.sort_values()
+
+        # Fill in predicted survial along time grid
+        out = np.empty((len(all_times), input.shape[0]), dtype=float)
+        for b in np.unique(batch_ids):
+            idx = np.where(batch_ids == b)[0]
+            bch = per_batch_surv[b]
+            # align H0b onto union grid with forward-fill
+            H0b = bch.reindex(all_times, method='ffill').fillna(0.0).values
+            # survival = exp(- H0_b(t) * exp(g(x)))
+            out[:, idx] = np.exp(- np.outer(H0b, expg[idx]))
+            
+        return pd.DataFrame(out, index=all_times)
