@@ -1,6 +1,7 @@
 # folders
 archive/
 __pycache__/
+.vscode/
 logs/
 jobs/
 results/
@@ -22,5 +23,3 @@ data/
 models/
 !beta0.csv
 !augmentation_miRNA_names_538.csv
-# simulation/batch_effect/results/
-# !simulation/batch_effect/results/organized/
