@@ -21,5 +21,6 @@ slurm-temp.log
 raw-data/
 data/
 models/
-!beta0.csv
+!pss/pycox/models/
+# !beta0.csv
 !augmentation_miRNA_names_538.csv
