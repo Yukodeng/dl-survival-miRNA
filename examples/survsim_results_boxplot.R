@@ -28,8 +28,8 @@ modelType = "sgb" # "oracle", "oracle-linear", "lasso", "deepsurv-torch", "rsf",
 
 
 ## ─── Load pre-computed result objects ───────────────────────
-
-all_results <- read.csv(file.path("results", "all_results_w_stratified.csv"), check.name=F)
+file_names <- list.files(file.path("results"), "all_results_w_stratified.*.csv")
+all_results <- read.csv(file.path("results", file_names[length(file_names)]), check.name=F)
 all_results <- all_results |> 
   mutate(
     # `n train` = ifelse(
@@ -158,5 +158,5 @@ p <- data |>
 
 ggsave(
   file.path("results", "plots", glue("facet_boxplot_{modelType}_results.jpg")), 
-  plot=p, height=9, width=20, units = 'in'
+  plot=p, height=9, width=20, units = 'in', dpi=600
 )

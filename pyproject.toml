@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "precision-seq-survival"
+version = "0.1.0"
+description = "Survival simulation and modeling pipeline (Cox/SSVM/RSF/DeepSurv)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+dependencies = [
+  "numpy", "pandas", "matplotlib",
+  "scikit-learn", "scikit-survival",
+  "optuna", "torch", "torchtuples", "pycox",
+  "sklearn-pandas"
+]
+
+[tool.setuptools.packages.find]
+where = ["pss"]
+
+[project.scripts]
+pss-deepsurv = "precision_seq_survival.main:main"        # expects main(config_path)
+pss-sksurv   = "precision_seq_survival.main_sksurv:main" # argparse entrypoint
