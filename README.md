@@ -32,7 +32,7 @@ The axes of experimental comparisons of data generation and survival modeling sc
 
     -   Nonlinear quadratic association (**nl-quadratic**): 10 markers standardized
 
-    -   Qudratic with shifted center by median (**nl-shiftquad**) (*optional*)
+    -   *Qudratic with shifted center by median (**nl-shiftquad**) (**optional**)*
 
     -   Sine transformation (**nl-sine**): 10 true markers with sine transformation
 
@@ -96,14 +96,17 @@ python3.10 -m venv <env-name>
 
 # Step 2: Activate virtual environment
 
-## OS/Linux:
-source <env-name>/bin/activate
+    ## OS/Linux:
+    source <env-name>/bin/activate
 
-## Windows:
-<env-name>\Scripts\activate.bat
+    ## Windows:
+    <env-name>\Scripts\activate.bat
 
-# Step 3: Install python packages
-pip install -r requirements.txt
+# Step 3: Install precision.seq.survival (pss) package
+pip install -e .
+
+# (Optional) Any extra Python dependencies
+pip install -r requirements.txt   
 ```
 
 ## Examples
@@ -127,19 +130,23 @@ The datasets should be formatted as pandas data frames (`pandas.DataFrame`), wit
 Once the dataset is loaded, we can initialize the modeling class object to implement any of the survival risk model of interest. For example, the SSVM model:
 
 ``` python
-mdl = SVMSurvivalModel(
-    train_df, test_df, 
-    batchNormType="BE00Asso00_normTC",  ## batch type and normalization type
-    dataName='linear-moderate',  ## marker-survival association type
-    is_stratified=True  ## whether to implement batch-stratification
+ml = MLSurvivalPipeline(
+    model_type="ssvm",  # ML model type (`rsf`, `ssvm`, `sgb`)
+    train_df=train_df,
+    test_df=test_df, 
+    batchNormType="BE00Asso00_normTC", # batch type and normalization type
+    dataName='linear-moderate',        # marker-survival association type
+    is_stratified=True                 # whether to apply batch-stratification in modeling 
 )
 
-results = mdl.train_over_subsets( 
-    subset_sizes=[100, 500, 1000, 2000, 5000, 10000], 
-    runs_per_size=[20, 20, 20, 20, 20, 20],
-    splits_per_size=[3, 5, 5, 10, 10, 10], 
-    is_tune=False
-    is_save=True
+results = train_over_subsets( 
+    ml,
+    subset_sizes=[100, 500, 1000, 2000, 5000, 10000], # number of training samples
+    runs_per_size=[20, 20, 20, 20, 20, 20], # number of iterations for each training size
+    splits_per_size=[3, 5, 5, 10, 10, 10],  # number of folds in cross-validation for each training size
+    is_tune=False,
+    is_save=True,
+    file_name=...
 )
 ```
 
@@ -156,20 +163,25 @@ hyperparameters = {
     "dropout": {"type": "float", "low": 0.1, "high": 0.5}
 }
 
-mdl = DeepSurvPipeline(
+dl = DeepSurvPipeline(
     train_df, test_df, 
     batchNormType=..., 
     dataName=...,
+    is_stratified=True,                 
     hyperparameters=hyperparameters,     # dictionary of optuna-compatible hyperparameter search grid 
     storage_url="sqlite:///example.db",  # SQLite databse with tuning trial information for individual studies
 )
-results = mdl.train_over_subsets(
-    subset_sizes=..., 
-    runs_per_size=..., 
-    splits_per_size=...,
-    trials_per_size=[20,20,20,30,30,50],  # num of trials (length should match with training size list) 
-    trial_threshold=20,  # minimum number of existing trials to allow skipping tuning
-    is_tune=True  # remember to set to True
+
+results = train_over_subsets(
+    dl,
+    subset_sizes=...,    
+    runs_per_size=...,   
+    splits_per_size=..., 
+    trials_per_size=...  # num of trials (length should match with training size list) 
+    trial_threshold=..,  # minimum number of existing trials to allow skipping tuning
+    is_tune=True         # remember to set to True to allow optuna hyperparameter tuning
+    is_save=True,        # save resutls
+    file_name=...        # default to "model_results_mmddyy.csv"
 )
 ```
 

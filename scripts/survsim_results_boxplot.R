@@ -22,7 +22,7 @@ library(ggplot2)
 library(ggh4x)
 library(glue)
 
-
+N_train = 2000
 modelType = "sgb" # "oracle", "oracle-linear", "lasso", "deepsurv-torch", "rsf", "ssvm", "sgb"
 
 
@@ -32,9 +32,6 @@ file_names <- list.files(file.path("results"), "all_results_w_stratified.*.csv")
 all_results <- read.csv(file.path("results", file_names[length(file_names)]), check.name=F)
 all_results <- all_results |> 
   mutate(
-    # `n train` = ifelse(
-    #   (`model type` %in% c('rsf','stratified-rsf')) & (`n train`==8000), 10000, `n train`
-    # ),
     `model type` = gsub('svm',"ssvm",`model type`),
     `model type` = gsub('gb',"sgb",`model type`)
   ) 
@@ -71,6 +68,7 @@ data = all_results |>
       ifelse(grepl('stratified', `model type`), 'ST', 'NS')
     ),
     Model = gsub("stratified-", "", `model type`),
+    Model = factor(Model, levels = c("oracle", "oracle-linear", "lasso", "deepsurv-torch", "rsf", "ssvm", "sgb")),
     Batch = gsub("_norm.*", "", `batchnorm type`),
     Normalization = gsub(".*_norm", "", `batchnorm type`),
     Normalization = case_when(
@@ -94,15 +92,21 @@ data = all_results |>
       levels = c("Moderate (linear)","Weak (linear)","Quadratic","Interactions","Sine")
     )
   ) |>
-  filter(#Batch == batchType & 
-    Model == modelType) |>
-  group_by(Batch, Normalization, `n train`, Association, Stratified) |> 
+  filter(
+    # Batch == batchType 
+    `n train`==N_train
+    # Model == modelType
+  ) |> 
+  group_by(
+    Batch, Normalization,  Association, Stratified, Model#`n train`
+  ) |> 
   summarize(`C-index` = mean(`test C`, na.rm = T),
             min = min(`test C`, na.rm = T),
             max = max(`test C`, na.rm = T)) |> 
   ungroup() |> 
   select(
-    N = `n train`,
+    # N = `n train`,
+    Model,
     Batch,
     Normalization, 
     Stratified,
@@ -126,20 +130,22 @@ p <- data |>
     width = 0.3, linewidth = .75, position = pd
   ) +
   geom_point(aes(shape = Stratified), size = 1.75, position = pd) +
+  geom_hline(yintercept = 0.5, linetype = "dashed", color='grey20', alpha=0.3)+
   
-  facet_nested(Batch ~ Association + N) +
-  # facet_grid(rows = vars(Association), cols = vars(N), space = "free_x") +
+  facet_nested(Batch ~ Association + Model) + #N) +
+  # facet_grid(rows = vars(Association), cols = vars(Batch), space = "free_x") +
 
   scale_color_brewer(palette = "Set2") + 
   scale_shape_manual(values = c(NS = 16, ST = 25)) +
   scale_linetype_manual(values = c(NS = "solid", ST = "dashed")) +
+
   labs(
     x = NULL,
     y="C-Index", 
-    title = glue("{modelType} Results")
+    title = glue("Results (N={N_train})") #glue("{modelType} Results")
   ) + 
   # scale_y_continuous(breaks = seq(0.4, 1, by=0.2)) + #ylim(0.45, 0.95) +
-  theme_bw(base_size = 14, base_line_size = .3, base_rect_size = .2) +
+  theme_bw(base_size = 12, base_line_size = .3, base_rect_size = .2) +
   theme(
     panel.spacing = unit(0, "lines"),
     strip.text.y = element_text(size = 10, angle = 0),
@@ -153,10 +159,15 @@ p <- data |>
     linetype = guide_legend(title = "Stratified", nrow = 1, order = 2)
   )
 
+p
 
 ## ─── Save Plot ───────────────────────────────────────────
 
 ggsave(
-  file.path("results", "plots", glue("facet_boxplot_{modelType}_results.jpg")), 
+  file.path("results", "plots", glue("facet_boxplot_{N_train}_results.jpg")), 
   plot=p, height=9, width=20, units = 'in', dpi=600
 )
+# ggsave(
+#   file.path("results", "plots", glue("facet_boxplot_{modelType}_results.jpg")), 
+#   plot=p, height=9, width=20, units = 'in', dpi=600
+# )
