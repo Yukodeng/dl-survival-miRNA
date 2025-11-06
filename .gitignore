@@ -1,13 +1,26 @@
-DeepSurv/
-pycox-deepsurv/
+# folders
 archive/
 __pycache__/
-data/2024-08-08/
-data/2024-08-15/
-data/082924/
+.vscode/
+logs/
+jobs/
+results/
+
+# saved models
+weight_checkpoint_*
+*.db
+*.pkl
+*.log
+
+# scripts
+*.sh
+*.out
+slurm-temp.log
+
+# data
+raw-data/
+data/
 models/
-simulate_survival*.csv
-MSKpair_*.csv
-!MSKpair_miRNA_names.csv
-!MSKpair_MXF_merge.csv
-!MSKpair_PMFH_merge.csv
+!pss/pycox/models/
+# !beta0.csv
+!augmentation_miRNA_names_538.csv
