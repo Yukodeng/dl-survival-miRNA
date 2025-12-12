@@ -14,15 +14,18 @@
 # 23Jul2025 Corrected batch effect sorting scheme per Andy 7/21/25;
 #           Implemented manual CV using glmnet for stratified LASSO CoxPH
 # 13Aug2025 Moved Step 9 - Slurm script generation to a separate function
-# 03Nov2025 Add integrated brier score calculation to 
+# 13Nov2025 Add integrated brier score calculation to CoxPH and LASSO models
+# 08Dec2025 Add train n=200 and save modeling results to `results/models/`` folder
 ############################################################################# ##
 library(ggsurvfit)
 library(survival)
-library(edgeR)
 library(glmnet)
+library(edgeR)
 library(dplyr)
+library(pec)
 library(ggplot2)
 library(preprocessCore)
+library(cli)
 # library(splitstackshape) # for train-test split on multiple outcome variables
 
 # Import Python package scikit-learn for train-test split
@@ -74,6 +77,37 @@ for(i in 1:n_batch) {
 
 # Main Simulation Functions --------------------------------------------------
 
+get_IBS_score <- function(df, fit, time_col="time", status_col="status", k_times=20) {
+  
+  # Time grids: k_times equally spaced points between the min and max EVENT times
+  events <- df[[status_col]] == 1
+  times <- seq(ceiling(min(df[events, time_col])), floor(max(df[events, time_col])),
+              length.out = k_times)
+
+  # compute Brier curves and IBS (IPCW with KM for censoring)
+  pec <- tryCatch({
+      pec(object = list('coxph' = fit),
+          formula = fit$formula,
+          data = df,
+          times = times,
+          exact = F,
+          reference = F,
+          cens.model = "cox",
+          keep.matrix = F)
+    }, error = function(e) {
+      pec(object = list('coxph' = fit),
+          formula = Surv(time, status) ~ 1,
+          data = df,
+          times = times,
+          exact = F, 
+          reference = F,
+          cens.model = "marginal",
+          keep.matrix = F)
+    })
+  ibs <- as.numeric(crps(pec)) # CRPS to extract IBS
+  
+  return(ibs)
+}
 
 simulate_T <- function(h0, h.log, n_train, max.censor.time) {
   
@@ -95,35 +129,6 @@ simulate_T <- function(h0, h.log, n_train, max.censor.time) {
 
 
 
-# rwd.max=22.516867
-# rwd.sd=4.039547
-# max.censor.time=200
-# p=10
-# p.weak=30
-# n_batch=10
-# stratify=1
-# test_size=1000
-# subset_sizes = c(100,500)
-# runs_per_size = c(20,20)
-# splits_per_size = c(3,5)
-# seed=1234
-# N=10000
-# N.test=10000
-# test.ids=test.ids
-# sim.dataType='linear-moderate'
-# nonzero.genes=nonzero.genes
-# n_batch=10
-# h0=2.75
-# he_train=1
-# he_test=0
-# beta_sort_train=0
-# beta_sort_test=0
-# norm_type=0
-# save_gene_data=F
-# save_surv_data=F
-# save_beta=F
-# plot_km=F
-# run_analysis=T
 sim.survdata <- function(surv.data,
                          N=10000,
                          N.test=10000,
@@ -138,8 +143,8 @@ sim.survdata <- function(surv.data,
                          p.weak=30,
                          plot_km=T,
                          save_surv_data=F,
-                         save_beta=T,
                          save_gene_data=T,
+                         save_beta=T,
                          n_batch=10,
                          he_train=0,
                          he_test=0,
@@ -149,9 +154,9 @@ sim.survdata <- function(surv.data,
                          run_analysis=T,
                          stratify=1, 
                          test_size=1000, 
-                         subset_sizes = c(100,500,1000,2000,5000,10000),
-                         runs_per_size = c(20,20,20,20,20,20),
-                         splits_per_size = c(3,5,5,10,10,10),
+                         subset_sizes = c(100,200,500,1000,2000,5000,10000),
+                         runs_per_size = c(20,20,20,20,20,20,20),
+                         splits_per_size = c(3,4,5,5,10,10,10),
                          seed=1234) {
   
   set.seed(seed)
@@ -164,9 +169,6 @@ sim.survdata <- function(surv.data,
 
   cat("\n\nStarting survival simulation..\n\n")
 
-  # Read in gene names
-  g.names = read.csv("data/augmentation_miRNA_names_538.csv")$gene ## gene names
-  P = length(g.names)
 
   ### Load augmented data with/without batch -----
   # Check if there's any negative values
@@ -259,7 +261,6 @@ sim.survdata <- function(surv.data,
     } else {
       selected.geneid = candidate.geneid
     }
-    # print(selected.geneid)
 
     # Log-transform gene expression
     xtrue.weak = workingt[selected.geneid,]
@@ -344,7 +345,7 @@ sim.survdata <- function(surv.data,
 
   ## 4. Introduce Batch Effects --------------------------------------
 
-  ### Split into train and test (stratified on events and batch) -----
+  ## Split into train and test (stratified on events and batch)
   batch.id=rep(1:n_batch, each=N)
   batch.event.temp =
     as.data.frame(cbind(delta, batch.id)) %>%
@@ -385,10 +386,10 @@ sim.survdata <- function(surv.data,
     x.train=log(x.train.count+0.5)
 
   } else {
+    ### NOTE: extract batch on the natural log scale
     xtrue.train.log = log(xtrue.train+0.5)
     batch.train.log = log(batch.train+0.5)
-    ## NOTE: extract batch on the natural log scale
-    ### update 7/16: scale batch effects by 1/2
+    ### [update 7/16] scale batch effects by 1/2
     batch.obs = (batch.train.log - xtrue.train.log) / 2
 
     ### Note: skip partial sorting
@@ -411,34 +412,6 @@ sim.survdata <- function(surv.data,
 
     batch.obs$batch_id = factor(batch.obs$batch_id, levels = batch.order)
     batch.obs.sorted = batch.obs[order(batch.obs$batch_id), ] %>% select(-batch_id)
-
-    # batch.obs.med = batch.obs %>%
-    #   group_by(batch_id) %>%
-    #   summarise(across(everything(), median)) %>%
-    #   select(-batch_id) %>%
-    #   as.matrix()
-    # ## partially sort batch.obs for each gene
-    # batch.temp = exp(batch_sort_train*batch.obs.med)
-    # batch.obs.sorted = matrix(nrow=N.train, ncol=P)
-    # colnames(batch.obs.sorted) = g.names
-    #
-    # for(j in 1:P){
-    #   batch.id.unique2=batch.id.unique
-    #   batch.id.unique.new=rep(NA, n_batch)
-    #   batch.tempj=batch.temp[,j]
-    #
-    #   for(b in 1:(n_batch-1)){
-    #     probs = batch.tempj/sum(batch.tempj)
-    #     sel = rmultinom(1, 1, probs)
-    #     batch.id.unique.new[b] = batch.id.unique2[sel==1]
-    #     batch.id.unique2 = batch.id.unique2[sel!=1]
-    #     batch.tempj = batch.tempj[sel!=1]
-    #   }
-    #   batch.id.unique.new[n_batch] = batch.id.unique[!(batch.id.unique %in% batch.id.unique.new)]
-    #   batch.obsj = batch.obs[,c('batch_id', g.names[j])] %>%
-    #     arrange(batch_id = factor(batch_id, levels = batch.id.unique.new))
-    #   batch.obs.sorted[,j] = batch.obsj[,2]
-    # }
 
     ## sort batch by survival time
     if(beta_sort_train != 0) {
@@ -485,8 +458,8 @@ sim.survdata <- function(surv.data,
   } else {
     xtrue.test.log = log(xtrue.test+0.5)
     batch.test.log = log(batch.test+0.5)
-    ## NOTE: on the natural log scale
-    ### update 7/16: scale batch effects by 1/2
+    ### NOTE: on the natural log scale
+    ### [update 7/16] scale batch effects by 1/2
     batch.obs = (batch.test.log - xtrue.test.log) / 2
     batch.test.log = batch.obs + xtrue.test.log
     batch.test = exp(as.data.frame(lapply(batch.test.log, cap_and_add_noise, cap=rwd.max, sd=rwd.sd)))
@@ -501,35 +474,6 @@ sim.survdata <- function(surv.data,
 
     batch.obs$batch_id = factor(batch.obs$batch_id, levels = batch.order)
     batch.obs.sorted = batch.obs[order(batch.obs$batch_id), ] %>% select(-batch_id)
-
-    # batch.obs.med = batch.obs %>%
-    #   group_by(batch_id) %>%
-    #   summarise(across(everything(), median)) %>%
-    #   select(-batch_id) %>%
-    #   as.matrix()
-    # batch.temp = exp(batch_sort_test*batch.obs.med)
-    #
-    # ## partially sort batch.obs for each gene
-    # batch.obs.sorted = matrix(nrow=N.test, ncol=P)
-    # colnames(batch.obs.sorted) = g.names
-    #
-    # for(j in 1:P){
-    #   batch.id.unique2=batch.id.unique
-    #   batch.id.unique.new=rep(NA, n_batch)
-    #   batch.tempj=batch.temp[,j]
-    #
-    #   for(b in 1:(n_batch-1)){
-    #     probs=batch.tempj/sum(batch.tempj)
-    #     sel=rmultinom(1, 1, probs)
-    #     batch.id.unique.new[b]=batch.id.unique2[sel==1]
-    #     batch.id.unique2=batch.id.unique2[sel!=1]
-    #     batch.tempj=batch.tempj[sel!=1]
-    #   }
-    #   batch.id.unique.new[n_batch]=batch.id.unique[!(batch.id.unique %in% batch.id.unique.new)]
-    #   batch.obsj = batch.obs[,c('batch_id', g.names[j])] %>%
-    #     arrange(batch_id=factor(batch_id, levels = batch.id.unique.new))
-    #   batch.obs.sorted[,j]=batch.obsj[,2]
-    # }
 
     ## Sort batch by survival time
     if(beta_sort_test!=0){
@@ -561,6 +505,7 @@ sim.survdata <- function(surv.data,
   # cor.surv.batch.te.01 = cor(t.test[id.new.test], apply(batch.obs.sorted, 1, median))
   # cor.surv.batch.te.0 = cor(t.test[id.new.test], apply(batch.obs %>% select(-batch_id), 1, median))
     #cor(t.test[id.new.test], apply((log(batch.test+0.5) - xtrue.test.log), 1, median))
+  
   
   ## 5. Normalization ------------------------------------------------
   
@@ -611,7 +556,7 @@ sim.survdata <- function(surv.data,
     x.test.count=exp(x.test)
   }
 
-  if(norm_type==5) { # DESeq2
+  if(norm_type==5) { # DESeq
     print("Normalization type: DESeq")
 
     x.train_deseq = norm.DESeq(round(t(x.train.count),0) + 1)
@@ -688,7 +633,7 @@ sim.survdata <- function(surv.data,
               file.path(out.dir, glue::glue("beta0_{sim.dataType}_{date}.csv")) )
   }
 
-  ## 7. K-M plot of simulated survival data --------------------------
+  # 7. K-M plot of simulated survival data --------------------------
 
   if (plot_km) {
     sim.out=rbind(
@@ -714,16 +659,20 @@ sim.survdata <- function(surv.data,
   }
 
 
-  ## 8. Analysis ------------------------------------------------------
+  ## [NOTE] Potentially move to a new script? ----
+  # 8. Analysis ------------------------------------------------------
   
   if (run_analysis) {
 
     cat(glue::glue("\nMoving on to CoxPH analysis for {batchNormType}-{sim.dataType}...\n\n"))
 
     # Initialize metric vectors
-    n_train=c_o=c_o_test=c_nl=c_nl_test=c_l=c_l_test=l_l=c()
+    n_train=c_o=c_o_test=c_nl=c_nl_test=c_l=c_l_test=l_l=
+      ibs_o=ibs_o_test=ibs_nl=ibs_nl_test=ibs_l=ibs_l_test=c()
+
     if(stratify == 1){
-      c_os=c_os_test=c_nls=c_nls_test=c_ls=c_ls_test=l_ls=c()
+      c_os=c_os_test=c_nls=c_nls_test=c_ls=c_ls_test=l_ls=
+        ibs_os=ibs_os_test=ibs_nls=ibs_nls_test=ibs_ls=ibs_ls_test=c()
     }
 
     # Convert train data to Python data frame for splitting
@@ -740,25 +689,26 @@ sim.survdata <- function(surv.data,
         sim_test_py[['batch.id']]$astype("str"), sep = "_"
       )
 
-    for (i in 1:length(subset_sizes)) {
-      
+    for (i in cli_progress_along(1:length(subset_sizes))) {
+    # print(i)
       n = subset_sizes[i]
       n_run = runs_per_size[i]
       n_splits = splits_per_size[i]
 
-      run_c_o=run_c_o_test=run_c_nl=run_c_nl_test=run_c_l=run_c_l_test=c()
+      run_c_o=run_c_o_test=run_c_nl=run_c_nl_test=run_c_l=run_c_l_test=
+        run_ibs_o=run_ibs_o_test=run_ibs_nl=run_ibs_nl_test=run_ibs_l=run_ibs_l_test=c()
       if (stratify == 1) {
-        run_c_os=run_c_os_test=run_c_nls=run_c_nls_test=run_c_ls=run_c_ls_test=c()
+        run_c_os=run_c_os_test=run_c_nls=run_c_nls_test=run_c_ls=run_c_ls_test=
+          run_ibs_os=run_ibs_os_test=run_ibs_nls=run_ibs_nls_test=run_ibs_ls=run_ibs_ls_test=c()
       }
 
       cat(glue::glue("Running for N={n}...\n\n"))
-
-      for (run in 1:n_run) {
       
+      for (run in 1:n_run) {
+      # print(run)
         attempt <- 0
         
         repeat {
-
           # Sample training subset
           if (n < nrow(sim_train_py)) {
             train_sub_py <- skl_ms$train_test_split(
@@ -802,108 +752,129 @@ sim.survdata <- function(surv.data,
         x0_train = data_train[,selected.geneid]
         x0_test  = data_test[, selected.geneid]
 
-        ## [!UNCOMMENT] TEMP FOR Stratified-LASSO RERUN ----
-        # ## Non-stratified analysis -------------------------------------
-        # 
-        # ### Oracle (linear) analysis -------------------------------
-        # 
-        # # Train
-        # coxfit_o = tryCatch(
-        #   coxph(Surv(data_train$time, data_train$status) ~ as.matrix(x0_train)),
-        #   error=function(e) e,
-        #   warning=function(w) w
-        # )
-        # if(is(coxfit_o, "warning") | is(coxfit_o, "error")) {
-        #   coxfit_o = coxph(Surv(data_train$time, data_train$status) ~ ridge(as.matrix(x0_train), theta=1))
-        # }
-        # run_c_o[length(run_c_o)+1] = c_o[length(c_o)+1] =
-        #   summary(coxfit_o)$concordance[1]
-        # 
-        # # Test
-        # coxfit_o_test = coxph(
-        #   Surv(data_test$time, data_test$status) ~ as.matrix(x0_test),
-        #   init=summary(coxfit_o)$coefficient[,1],
-        #   control=coxph.control(iter.max=0)
-        # )
-        # run_c_o_test[length(run_c_o_test)+1] = c_o_test[length(c_o_test)+1] =
-        #   summary(coxfit_o_test)$concordance[1]
-        # 
-        # 
-        # ### Oracle (nonlinear) analysis ---------------------------
-        # 
-        # # Transform train/test gene count data (rows: samples x columns: genes)
-        # if (!sim.dataType %in% c('linear-moderate', 'linear-weak')) {
-        # 
-        #   #### 10 quadratic terms -------------------
-        #   if (sim.dataType=='nl-quadratic') {
-        # 
-        #     x0_t_train = apply(x0_train, 2, scale)^2  ## scale across 2=columns (genes)
-        #     x0_t_test = apply(x0_test, 2, scale)^2
-        # 
-        #   #### 10 quadratic with intercept ----------
-        #   } else if (sim.dataType=='nl-shiftquad') {
-        # 
-        #     x0_train_scaled = apply(x0_train, 2, scale)
-        #     x0_test_scaled = apply(x0_test, 2, scale)
-        # 
-        #     c_tr = apply(x0_train_scaled, 2, median)
-        #     c_te = apply(x0_test_scaled, 2, median)
-        # 
-        #     x0_t_train = sweep(x0_train_scaled, 2, c_tr, "-")^2   # element-wise transformation
-        #     x0_t_test = sweep(x0_test_scaled, 2, c_te, "-")^2
-        # 
-        #   #### 10 interaction terms ----------------
-        #   } else if (sim.dataType=='nl-interaction') {
-        # 
-        #     # cat(glue::glue("Interaction term: {interact.gene}\n"))
-        #     x0_train_scaled = apply(x0_train, 2, scale)
-        #     x0_test_scaled = apply(x0_test, 2, scale)
-        #     interact.gene.tr = x0_train_scaled[,interact.gene]
-        #     interact.gene.te = x0_test_scaled[, interact.gene]
-        # 
-        #     x0_t_train = sweep(x0_train_scaled, 1, interact.gene.tr, FUN="*")
-        #     x0_t_test = sweep(x0_test_scaled, 1, interact.gene.te, FUN="*")
-        # 
-        #   #### 10 sine terms ----------------------
-        #   } else if (sim.dataType=='nl-sine') {
-        # 
-        #     x0_t_train = sin(x0_train)
-        #     x0_t_test = sin(x0_test)
-        #   }
-        # 
-        #   # Train
-        #   coxfit_nl = tryCatch(
-        #     coxph(Surv(data_train$time, data_train$status) ~ as.matrix(x0_t_train)),
-        #     error=function(e) e,
-        #     warning=function(w) w
-        #   )
-        #   if(is(coxfit_nl, "warning") | is(coxfit_nl, "error")) {
-        #     coxfit_nl = coxph(
-        #       Surv(data_train$time, data_train$status) ~ ridge(as.matrix(x0_t_train), theta=1))
-        #   }
-        #   run_c_nl[length(run_c_nl)+1] = c_nl[length(c_nl)+1] =
-        #     summary(coxfit_nl)$concordance[1]
-        # 
-        #   # Test
-        #   coxfit_nl_test = coxph(
-        #     Surv(data_test$time, data_test$status) ~ as.matrix(x0_t_test),
-        #     init=summary(coxfit_nl)$coefficient[,1],
-        #     control=coxph.control(iter.max=0)
-        #   )
-        #   run_c_nl_test[length(run_c_nl_test)+1] = c_nl_test[length(c_nl_test)+1] =
-        #     summary(coxfit_nl_test)$concordance[1]
-        # 
-        # } else {
-        #   run_c_nl[length(run_c_nl)+1] =
-        #     c_nl[length(c_nl)+1] =
-        #     run_c_nl_test[length(run_c_nl_test)+1] =
-        #     c_nl_test[length(c_nl_test)+1] = NA
-        # }
+        
+        ## Non-stratified analysis -------------------------------------
+        ### Oracle (linear) analysis ------------------------------
+
+        formula = as.formula(
+          glue::glue("Surv(time, status) ~ {paste(colnames(x0_train), collapse = '+')}"))
+        
+        # Train
+        coxfit_o = tryCatch(
+          coxph(formula=formula, data=data_train, x=T, y=T),
+          error=function(e) e,
+          warning=function(w) w
+        )
+        if(is(coxfit_o, "warning") | is(coxfit_o, "error")) {
+          formula = as.formula(
+            glue::glue("Surv(time, status) ~ ridge({paste(colnames(x0_train), collapse = ',')}, theta=1)")
+          )
+          coxfit_o = coxph(formula=formula, data=data_train, x=T, y=T)
+        }
+        run_c_o[length(run_c_o)+1] = c_o[length(c_o)+1] = summary(coxfit_o)$concordance[1]
+        # [UPDATE 10/22] Calculate Integrated Brier Score (IBS) with {pec}
+        run_ibs_o[length(run_ibs_o)+1] = ibs_o[length(ibs_o)+1] = get_IBS_score(data_train, coxfit_o)
+
+
+        # Test
+        coxfit_o_test = coxph(
+          formula=formula, data=data_test, x=T, y=T,
+          init=summary(coxfit_o)$coefficient[,1],
+          control=coxph.control(iter.max=0)
+        )
+        run_c_o_test[length(run_c_o_test)+1] = c_o_test[length(c_o_test)+1] =
+          summary(coxfit_o_test)$concordance[1]
+
+        run_ibs_o_test[length(run_ibs_o_test)+1] = ibs_o_test[length(ibs_o_test)+1] = 
+          get_IBS_score(data_test, coxfit_o_test)
+        
+
+        ### Oracle (nonlinear) analysis ---------------------------
+        
+        # Transform train/test gene count data (rows: samples x columns: genes)
+        if (!sim.dataType %in% c('linear-moderate', 'linear-weak')) {
+        
+          #### 10 quadratic terms -------------------
+          if (sim.dataType=='nl-quadratic') {
+        
+            x0_t_train = apply(x0_train, 2, scale)^2  ## scale across 2=columns (genes)
+            x0_t_test = apply(x0_test, 2, scale)^2
+        
+          #### 10 quadratic with intercept ----------
+          } else if (sim.dataType=='nl-shiftquad') {
+        
+            x0_train_scaled = apply(x0_train, 2, scale)
+            x0_test_scaled = apply(x0_test, 2, scale)
+        
+            c_tr = apply(x0_train_scaled, 2, median)
+            c_te = apply(x0_test_scaled, 2, median)
+        
+            x0_t_train = sweep(x0_train_scaled, 2, c_tr, "-")^2   # element-wise transformation
+            x0_t_test = sweep(x0_test_scaled, 2, c_te, "-")^2
+        
+          #### 10 interaction terms ----------------
+          } else if (sim.dataType=='nl-interaction') {
+        
+            # cat(glue::glue("Interaction term: {interact.gene}\n"))
+            x0_train_scaled = apply(x0_train, 2, scale)
+            x0_test_scaled = apply(x0_test, 2, scale)
+            interact.gene.tr = x0_train_scaled[,interact.gene]
+            interact.gene.te = x0_test_scaled[, interact.gene]
+        
+            x0_t_train = sweep(x0_train_scaled, 1, interact.gene.tr, FUN="*")
+            x0_t_test = sweep(x0_test_scaled, 1, interact.gene.te, FUN="*")
+        
+          #### 10 sine terms ----------------------
+          } else if (sim.dataType=='nl-sine') {
+        
+            x0_t_train = sin(x0_train)
+            x0_t_test = sin(x0_test)
+          }
+        
+          # Train
+          coxfit_nl = tryCatch(
+            coxph(formula=formula, 
+                  data=cbind(data_train[,c('time','status')], x0_t_train),
+                  x=T, y=T),
+            error=function(e) e,
+            warning=function(w) w
+          )
+          if(is(coxfit_nl, "warning") | is(coxfit_nl, "error")) {
+            coxfit_nl = coxph(
+              formula=as.formula(
+                  glue::glue("Surv(time, status) ~ ridge({paste(colnames(x0_t_train), collapse=',')}, theta=1)")
+                ), 
+              data=cbind(data_train[, c('time','status')], x0_t_train),
+              x=T, y=T)
+          }
+
+          run_c_nl[length(run_c_nl)+1] = c_nl[length(c_nl)+1] = summary(coxfit_nl)$concordance[1]
+          run_ibs_nl[length(run_ibs_nl)+1] = ibs_nl[length(ibs_nl)+1] = get_IBS_score(data_train, coxfit_nl)
+        
+          # Test
+          coxfit_nl_test = coxph(
+            formula=formula,
+            data=cbind(data_test[,c('time', 'status')], x0_t_test),
+            init=summary(coxfit_nl)$coefficient[,1],
+            control=coxph.control(iter.max=0),
+            x=T, y=T
+          )
+          run_c_nl_test[length(run_c_nl_test)+1] = c_nl_test[length(c_nl_test)+1] = 
+            summary(coxfit_nl_test)$concordance[1]
+          run_ibs_nl_test[length(run_ibs_nl_test)+1] = ibs_nl_test[length(ibs_nl_test)+1] = 
+            get_IBS_score(data_test, coxfit_nl_test)
+
+        } else {
+          c_nl[length(c_nl)+1] = run_c_nl[length(run_c_nl)+1] =
+            c_nl_test[length(c_nl_test)+1] = run_c_nl_test[length(run_c_nl_test)+1] =
+            ibs_nl[length(ibs_nl)+1] = run_ibs_nl[length(run_ibs_nl)+1] =
+            ibs_nl_test[length(ibs_nl_test)+1] = run_ibs_nl_test[length(run_ibs_nl_test)+1] = NA
+        }
          
          
         ### Penalized Lasso -------------------------------------
 
-        # NOTE: reinclude univar filtering but allow more markers to be selected ----
+        # NOTE: reinclude univar filtering but allow more markers to be selected
         # ## Univariate filtering
         # lkhd_u = rep(0, ncol(x_train))
         # for(j in 1:length(lkhd_u)){
@@ -918,105 +889,165 @@ sim.survdata <- function(surv.data,
         # lkhd_p_thres=lkhd_p_sort[round(min(sum(data_train$status)/10, ncol(x_train)/4))]
 
         cv_l = cv.glmnet(
-          as.matrix(x_train),
-          # as.matrix(x_train[,lkhd_u >= lkhd_p_thres]),
+          as.matrix(x_train), # as.matrix(x_train[,lkhd_u >= lkhd_p_thres]),
           Surv(data_train$time, data_train$status),
           nfolds=n_splits,
           family="cox",
           alpha=1, # Lasso
           standardize=F
-          )
+        )
         lambda_min = cv_l$lambda.min
         l_l[length(l_l)+1] = lambda_min
 
         # Fit final lasso regression
         glmnet_l = glmnet(
-          as.matrix(x_train),
-          # as.matrix(x_train[,lkhd_u >= lkhd_p_thres]),
+          as.matrix(x_train), # as.matrix(x_train[,lkhd_u >= lkhd_p_thres]),
           Surv(data_train$time, data_train$status),
-          family="cox", alpha=1, lambda=lambda_min,
+          family="cox",
+          alpha=1, 
+          lambda=lambda_min,
           standardize=F
-          )
+        )
+        b_l0temp = as.vector(coef(glmnet_l))
+        b_l_sel = b_l0temp[b_l0temp!=0]
 
-        # Train score
-        lp_train = predict(glmnet_l, newx = as.matrix(x_train), #as.matrix(x_train[,lkhd_u>=lkhd_p_thres]),
-                           s=lambda_min, type="link")
-        c_l[length(c_l)+1] = run_c_l[length(run_c_l)+1] =
-          survcomp::concordance.index(x=lp_train, surv.time=data_train$time, surv.event=data_train$status)$c.index
+        x_train_sel= data.frame(x_train[, b_l0temp!=0])
+        x_test_sel = data.frame(x_test[, b_l0temp!=0])
+        colnames(x_train_sel)=colnames(x_test_sel)=colnames(x_train)[b_l0temp!=0]
 
-        # Test score
-        lp_test = predict(glmnet_l, newx = as.matrix(x_test), #as.matrix(x_test[,lkhd_u>=lkhd_p_thres]),
-                          s=lambda_min, type="link")
-        c_l_test[length(c_l_test)+1] = run_c_l_test[length(run_c_l_test)+1] =
-          survcomp::concordance.index(x=lp_test, surv.time=data_test$time, surv.event=data_test$status)$c.index
+        # Train
+        coxfit_l = tryCatch({
+            coxph(
+              formula=as.formula(glue::glue(
+                "Surv(time, status) ~ {paste(colnames(x_train_sel), collapse='+')}"
+              )),
+              data=cbind(data_train[,c('time','status')], x_train_sel),
+              init=b_l_sel, control=coxph.control(iter.max=0),
+              x=T, y=T
+            )
+          }, error = function(e) {
+            coxph(
+              formula = Surv(time, status) ~ 1,
+              data=cbind(data_train[,c('time','status')], x_train_sel),
+              init=b_l_sel, control=coxph.control(iter.max=0),
+              x=T, y=T
+            )
+          }
+        )
+        c_l[length(c_l)+1] = run_c_l[length(run_c_l)+1] = summary(coxfit_l)$concordance[1]
+        ibs_l[length(ibs_l)+1] = run_ibs_l[length(run_ibs_l)+1] = get_IBS_score(data_train, coxfit_l)   
+
+        # Test
+        coxfit_l_test = coxph(
+          formula=coxfit_l$formula,
+          data=cbind(data_test[,c('time','status')], x_test_sel),
+          init=b_l_sel, control=coxph.control(iter.max=0),
+          x=T, y=T
+        )
+        c_l_test[length(c_l_test)+1] = run_c_l_test[length(run_c_l_test)+1] = 
+          summary(coxfit_l_test)$concordance[1]
+        ibs_l_test[length(ibs_l_test)+1] = run_ibs_l_test[length(run_ibs_l_test)+1] = 
+          get_IBS_score(data_test, coxfit_l_test)
 
 
+        
         ## Stratified analysis -----------------------------------------
+
         if(stratify == 1) {
           
-          ## [!UNCOMMENT] TEMP FOR N=2000 LASSO RERUN ----
-          # ### Oracle (linear) ----------------------------------
-          # 
-          # # Train
-          # coxfit_os = tryCatch(
-          #   coxph(Surv(data_train$time, data_train$status)~as.matrix(x0_train) + strata(data_train$batch.id)),
-          #   error = function(e) e,
-          #   warning = function(w) w
-          # )
-          # if (is(coxfit_os, "warning") | is(coxfit_os, "error")){
-          #   coxfit_os =
-          #     coxph(Surv(data_train$time, data_train$status)~ridge(as.matrix(x0_train), theta=1)+strata(data_train$batch.id))
-          # }
-          # run_c_os[length(run_c_os)+1] = c_os[length(c_os)+1] = summary(coxfit_os)$concordance[1]
-          # 
-          # # Test
-          # coxfit_os_test = coxph(
-          #   Surv(data_test$time, data_test$status)~as.matrix(x0_test) + strata(data_test$batch.id),
-          #   init = summary(coxfit_os)$coefficient[,1],
-          #   control = coxph.control(iter.max=0)
-          # )
-          # run_c_os_test[length(run_c_os_test)+1] = c_os_test[length(c_os_test)+1] =
-          #   summary(coxfit_os_test)$concordance[1]
-          # 
-          # 
-          # ### Oracle (nonlinear) -------------------------------
-          # 
-          # if (!sim.dataType %in% c('linear-moderate', 'linear-weak')) {
-          # 
-          #   # Train
-          #   coxfit_nls = tryCatch(
-          #     coxph(Surv(data_train$time, data_train$status)~as.matrix(x0_t_train) + strata(data_train$batch.id)),
-          #     error = function(e) e,
-          #     warning = function(w) w
-          #   )
-          #   if (is(coxfit_nls, "warning") | is(coxfit_nls, "error")) {
-          #     coxfit_nls =
-          #       coxph(Surv(data_train$time, data_train$status) ~ ridge(as.matrix(x0_t_train), theta=1)+strata(data_train$batch.id))
-          #   }
-          #   run_c_nls[length(run_c_nls)+1] = c_nls[length(c_nls)+1] = summary(coxfit_nls)$concordance[1]
-          # 
-          #   # Test
-          #   coxfit_nls_test = coxph(
-          #     Surv(data_test$time, data_test$status) ~ as.matrix(x0_t_test)+strata(data_test$batch.id),
-          #     init = summary(coxfit_nls)$coefficient[,1],
-          #     control = coxph.control(iter.max=0)
-          #   )
-          #   run_c_nls_test[length(run_c_nls_test)+1] = c_nls_test[length(c_nls_test)+1] =
-          #     summary(coxfit_nls_test)$concordance[1]
-          # 
-          # } else {
-          #     run_c_nls[length(run_c_nls)+1] =
-          #       c_nls[length(c_nls)+1] =
-          #       run_c_nls_test[length(run_c_nls_test)+1] =
-          #       c_nls_test[length(c_nls_test)+1] = NA
-          # }
+          ### Oracle (linear) ----------------------------------
+
+          # Train
+          formula = as.formula(glue::glue(
+            "Surv(time, status) ~ {paste(colnames(x0_train), collapse='+')} + strata(batch.id)"
+          ))
+          coxfit_os = tryCatch( 
+            coxph(
+              #Surv(data_train$time, data_train$status)~as.matrix(x0_train) + strata(data_train$batch.id)
+              formula=formula, data=data_train, x=T, y=T
+            ),
+            error = function(e) e,
+            warning = function(w) w
+          )
+          if (is(coxfit_os, "warning") | is(coxfit_os, "error")){
+            coxfit_os =
+              coxph(#Surv(data_train$time, data_train$status)~ridge(as.matrix(x0_train), theta=1)+strata(data_train$batch.id)
+                formula=as.formula(glue::glue(
+                  "Surv(time, status) ~ ridge({paste(colnames(x0_train), collapse=',')}, theta=1) + strata(batch.id)"
+                )),
+                data=data_train, x=T, y=T
+              )
+          }
+          run_c_os[length(run_c_os)+1]=c_os[length(c_os)+1]=summary(coxfit_os)$concordance[1]
+          run_ibs_os[length(run_ibs_os)+1]=ibs_os[length(ibs_os)+1]=get_IBS_score(data_train, coxfit_os)
+
+
+          # Test
+          coxfit_os_test = coxph(
+            formula=formula, data=data_test, x=T, y=T,
+            # Surv(data_test$time, data_test$status)~as.matrix(x0_test) + strata(data_test$batch.id),
+            init = summary(coxfit_os)$coefficient[,1],
+            control = coxph.control(iter.max=0)
+          )
+          run_c_os_test[length(run_c_os_test)+1] = c_os_test[length(c_os_test)+1] =
+            summary(coxfit_os_test)$concordance[1]
+          run_ibs_os_test[length(run_ibs_os_test)+1] = ibs_os_test[length(ibs_os_test)+1] = 
+            get_IBS_score(df=data_test, fit=coxfit_os_test, k_times=15)
+          
+
+          ### Oracle (nonlinear) -------------------------------
+
+          if (!sim.dataType %in% c('linear-moderate', 'linear-weak')) {
+
+            # Train
+            coxfit_nls = tryCatch(
+              coxph(#Surv(data_train$time, data_train$status)~as.matrix(x0_t_train) + strata(data_train$batch.id)
+                formula=formula, x=T, y=T,
+                data=cbind(data_train[,c('time','status','batch.id')], x0_t_train)
+              ),
+              error = function(e) e,
+              warning = function(w) w
+            )
+            if (is(coxfit_nls, "warning") | is(coxfit_nls, "error")) {
+              coxfit_nls =
+                coxph(#Surv(data_train$time, data_train$status) ~ ridge(as.matrix(x0_t_train), theta=1)+strata(data_train$batch.id)
+                  formula=as.formula(glue::glue(
+                    "Surv(time, status) ~ ridge({paste(colnames(x0_t_train), collapse=',')}, theta=1) + strata(batch.id)"
+                  )),
+                  data=cbind(data_train[,c('time','status','batch.id')], x0_t_train), x=T, y=T
+                )
+            }
+            run_c_nls[length(run_c_nls)+1] = c_nls[length(c_nls)+1] = summary(coxfit_nls)$concordance[1]
+            run_ibs_nls[length(run_ibs_nls)+1] = ibs_nls[length(ibs_nls)+1] = 
+              get_IBS_score(data_train, coxfit_nls, k_times = 15)
+
+            # Test
+            coxfit_nls_test = coxph(
+              # Surv(data_test$time, data_test$status) ~ as.matrix(x0_t_test)+strata(data_test$batch.id),
+              formula = formula,
+              data = cbind(data_test[,c('time','status','batch.id')], x0_t_test),
+              init = summary(coxfit_nls)$coefficient[,1],
+              control = coxph.control(iter.max=0),
+              x=T, y=T
+            )
+            run_c_nls_test[length(run_c_nls_test)+1] = c_nls_test[length(c_nls_test)+1] =
+              summary(coxfit_nls_test)$concordance[1]
+            run_ibs_nls_test[length(run_ibs_nls_test)+1] = ibs_nls_test[length(ibs_nls_test)+1] =
+              get_IBS_score(data_test, coxfit_nls_test, k_times=15)
+
+          } else {
+              run_c_nls[length(run_c_nls)+1] = c_nls[length(c_nls)+1] =
+                run_c_nls_test[length(run_c_nls_test)+1] = c_nls_test[length(c_nls_test)+1] = 
+                run_ibs_nls[length(run_ibs_nls)+1] = ibs_nls[length(ibs_nls)+1] =
+                run_ibs_nls_test[length(run_ibs_nls_test)+1] = ibs_nls_test[length(ibs_nls_test)+1] = NA
+          }
 
           
-          ### Lasso-penalized analysis --------------------------
+          ## Lasso-penalized analysis --------------------------
         
-          ## [Note 7/24/2025]
-          # run multiple experiments to see frequency of 10 true genes being selected
-          # change to save 1/2 of the genes
+          # # [Note 7/24/2025]
+          # # run multiple experiments to see frequency of 10 true genes being selected
+          # # change to save 1/2 of the genes
           # ## Univariate filtering
           # lkhd_us = rep(0, ncol(x_train))
           # for(j in 1:length(lkhd_us)){
@@ -1040,7 +1071,7 @@ sim.survdata <- function(surv.data,
           # }
           # lkhd_ps_sort=sort(lkhd_us, decreasing=TRUE)
           # lkhd_ps_thres=lkhd_ps_sort[round(min(sum(data_train$status)/10, length(lkhd_us)/4))]
-          #
+          
           # ## Fit stratified Lasso CV regression
           # cv_ls = glmnet_strat_cv(
           #   data=cbind(
@@ -1057,7 +1088,7 @@ sim.survdata <- function(surv.data,
           # l_ls[length(l_ls)+1] = cv_ls[[2]]
 
           ## [Update 7/23/2025] Manual CV
-          
+
           folds = caret::createMultiFolds(data_train$batch.id, k=n_splits, times=1)
 
           cv_cindex = c()
@@ -1105,6 +1136,7 @@ sim.survdata <- function(surv.data,
           }
           l_ls[length(l_ls)+1] = lambda_min
 
+          
           glmnet_ls = glmnet(
             as.matrix(x_train), # as.matrix(x_train[,lkhd_u >= lkhd_p_thres]),
             stratifySurv(Surv(data_train$time, data_train$status), data_train$batch.id),
@@ -1114,49 +1146,72 @@ sim.survdata <- function(surv.data,
             standardize=F
           )
           b_ls0temp = as.vector(coef(glmnet_ls))
+          b_ls_sel = b_ls0temp[b_ls0temp!=0]
+
+          x_train_sel = data.frame(x_train[,b_ls0temp!=0])
+          x_test_sel = data.frame(x_test[, b_ls0temp!=0])
+          colnames(x_train_sel)=colnames(x_test_sel)=colnames(x_train)[b_ls0temp!=0]
 
           # Train
-          coxfit_ls = coxph(
-            Surv(data_train$time, data_train$status) ~ as.matrix(x_train)+strata(data_train$batch.id),
-            init=b_ls0temp,
-            control=coxph.control(iter.max=0))
-
+          coxfit_ls = tryCatch({
+              coxph(
+                # Surv(data_train$time, data_train$status) ~ as.matrix(x_train)+strata(data_train$batch.id),
+                formula=as.formula(glue::glue(
+                  "Surv(time, status) ~ {paste(colnames(x_train_sel), collapse='+')} + strata(batch.id)"
+                )),
+                data=cbind(data_train[,c('time','status','batch.id')], x_train_sel),
+                init=b_ls_sel,
+                control=coxph.control(iter.max=0),
+                x=T, y=T)
+            }, error = function(e) {
+              coxph(
+                formula=Surv(time, status) ~ 1,
+                data=cbind(data_train[,c('time','status','batch.id')], x_train_sel),
+                init=b_ls_sel,
+                control=coxph.control(iter.max=0),
+                x=T, y=T
+              )
+            }
+          )
           run_c_ls[length(run_c_ls)+1]=c_ls[length(c_ls)+1]=summary(coxfit_ls)$concordance[1]
+          run_ibs_ls[length(run_ibs_ls)+1]=ibs_ls[length(ibs_ls)+1]=get_IBS_score(data_train, coxfit_ls)
 
           # Test
           coxfit_ls_test = coxph(
-            Surv(data_test$time, data_test$status) ~ as.matrix(x_test)+strata(data_test$batch.id),
-            init=b_ls0temp,
-            control=coxph.control(iter.max=0))
-
+            #Surv(data_test$time, data_test$status) ~ as.matrix(x_test)+strata(data_test$batch.id),
+            formula=coxfit_ls$formula,
+            data=cbind(data_test[,c('time','status','batch.id')], x_test_sel),
+            init=b_ls_sel,
+            control=coxph.control(iter.max=0),
+            x=T, y=T
+          )
           run_c_ls_test[length(run_c_ls_test)+1]=c_ls_test[length(c_ls_test)+1]=
             summary(coxfit_ls_test)$concordance[1]
+          run_ibs_ls_test[length(run_ibs_ls_test)+1]=ibs_ls_test[length(ibs_ls_test)+1]=
+            get_IBS_score(data_test, coxfit_ls_test, k_times=15)
         }
       } # end of multiple runs for loop
 
        cat(glue::glue("=============== Non-stratified ===============
-     (Oracle linear)     Train: {round(mean(run_c_o, na.rm=T),3)} |  Test: {round(mean(run_c_o_test, na.rm=T),3)}\
-     (Oracle nonlinaer)  Train: {round(mean(run_c_nl,na.rm=T),3)} |  Test: {round(mean(run_c_nl_test,na.rm=T),3)}\
-     (Lasso)             Train: {round(mean(run_c_l, na.rm=T),3)} |  Test: {round(mean(run_c_l_test, na.rm=T),3)}\n\n"
+     (Oracle linear) Train C: {round(mean(run_c_o, na.rm=T),3)}, IBS: {round(mean(run_ibs_o, na.rm=T),3)} | Test C: {round(mean(run_c_o_test, na.rm=T),3)}, IBS: {round(mean(run_ibs_o_test, na.rm=T),3)}\
+     (Oracle)        Train C: {round(mean(run_c_nl,na.rm=T),3)}, IBS: {round(mean(run_ibs_nl,na.rm=T),3)} | Test C: {round(mean(run_c_nl_test,na.rm=T),3)}, IBS: {round(mean(run_ibs_nl_test,na.rm=T),3)}\
+     (Lasso)         Train C: {round(mean(run_c_l, na.rm=T),3)}, IBS: {round(mean(run_ibs_l, na.rm=T),3)} | Test C: {round(mean(run_c_l_test, na.rm=T),3)}, IBS: {round(mean(run_ibs_l_test, na.rm=T),3)}\n\n"
       ))
       if (stratify == 1) {
         cat(glue::glue("================= Stratified ==================
-      (Oracle linear)     Train: {round(mean(run_c_os, na.rm=T),3)} |  Test: {round(mean(run_c_os_test, na.rm=T),3)}\
-      (Oracle nonlinaer)  Train: {round(mean(run_c_nls,na.rm=T),3)} |  Test: {round(mean(run_c_nls_test,na.rm=T),3)}\
-      (Lasso)             Train: {round(mean(run_c_ls, na.rm=T),3)} |  Test: {round(mean(run_c_ls_test, na.rm=T),3)}\n\n"
+      (Oracle linear) Train C: {round(mean(run_c_os, na.rm=T),3)}, IBS: {round(mean(run_ibs_os, na.rm=T),3)} | Test C: {round(mean(run_c_os_test, na.rm=T),3)}, IBS: {round(mean(run_ibs_os_test, na.rm=T),3)}\
+      (Oracle)        Train C: {round(mean(run_c_nls,na.rm=T),3)}, IBS: {round(mean(run_ibs_nls,na.rm=T),3)} | Test C: {round(mean(run_c_nls_test,na.rm=T),3)}, IBS: {round(mean(run_ibs_nls_test,na.rm=T),3)}\
+      (Lasso)         Train C: {round(mean(run_c_ls, na.rm=T),3)}, IBS: {round(mean(run_ibs_ls, na.rm=T),3)} | Test C: {round(mean(run_c_ls_test, na.rm=T),3)}, IBS: {round(mean(run_ibs_ls_test, na.rm=T),3)}\n\n"
         ))
       }
     } # end of all subsets for loop
 
-    ### Save model results ------------
+    ## Save model results ------------
    
-    ### [!UNCOMMENT] TEMP FOR N=2000 LASSO RERUN ----
-    modelList = c('ls')
-    # modelList = c('o','nl', 'l')
-    # if (stratify==1) { modelList = c(modelList, c('os','nls','ls')) }
+    modelList = c('o','nl', 'l')
+    if (stratify==1) { modelList = c(modelList, c('os','nls','ls')) }
 
-    for(model in modelList) {
-      
+    for(model in modelList) {    
       if (model=='o') {
         modelName='oracle-linear'
       } else if (model=='nl') {
@@ -1171,14 +1226,20 @@ sim.survdata <- function(surv.data,
         modelName='stratified-lasso'
       }
 
-      results.dir = file.path("models", batchNormType, sim.dataType, modelName)
+      results.dir = file.path("results", "models", batchNormType, sim.dataType, modelName)
       dir.create(results.dir, showWarnings=F, recursive = T)
 
       cobj=eval(parse(text=paste0("c_",model)))
       cobj_test=eval(parse(text=paste0("c_",model,"_test")))
-      model_results = data.frame('n train' = n_train,
-                                 'train C' = cobj,
-                                 'test C'  = cobj_test)
+      # [update 11/13] save IBS results
+      ibs_obj=eval(parse(text=paste0("ibs_",model)))
+      ibs_obj_test=eval(parse(text=paste0("ibs_",model,"_test")))
+
+      model_results = data.frame('n train'  = n_train,
+                                 'train C'  = cobj,
+                                 'test C'   = cobj_test,
+                                 'train IBS'= ibs_obj,
+                                 'test IBS' = ibs_obj_test)
       write.csv(model_results,
                 file.path(results.dir, paste0("model_results_", date,".csv")),
                 row.names=F)

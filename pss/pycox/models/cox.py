@@ -555,7 +555,7 @@ class CoxPHStratified(_CoxPHBase):
                                            baseline_hazards_=baseline_hazards_,
                                            eval_=eval_, num_workers=num_workers)
         
-        # Stratified: need batch_ids
+        #-------- Stratified: need batch_ids --------
         if not isinstance(baseline_hazards_, dict):
             raise ValueError("`baseline_hazards_` must be either a pd.Series or a dict of Series.")
 

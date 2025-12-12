@@ -10,8 +10,8 @@ from sksurv.linear_model import CoxnetSurvivalAnalysis
 from sksurv.svm import FastKernelSurvivalSVM
 from sksurv.ensemble import RandomSurvivalForest, GradientBoostingSurvivalAnalysis
 
-from .common import TunablePipelineBase, ResultsWriterMixin, _model_string, _default_hp_space
-from ..utils import dataframe_to_scikitsurv_ds
+from pss.run_models.common import TunablePipelineBase, ResultsWriterMixin, _model_string, _default_hp_space
+from pss.utils import dataframe_to_scikitsurv_ds
 
 
 MODEL_MAP = {
@@ -104,7 +104,7 @@ class MLSurvivalPipeline(TunablePipelineBase, ResultsWriterMixin):
         # stratify by "status_batch" for balanced assignment
         stratify_labels = df[[self.status_col, self.batch_col]].astype(str).agg("_".join, axis=1).values
         
-        df = df._with_batch_features(df)
+        df = self._with_batch_features(df)
         X, y = dataframe_to_scikitsurv_ds(df, time_col=self.time_col, status_col=self.status_col)
 
         scores = []
@@ -128,8 +128,8 @@ class MLSurvivalPipeline(TunablePipelineBase, ResultsWriterMixin):
         df_te = self.test_df.copy() if test_df is None else test_df
         n_train = df_tr.shape[0]
         
-        Xtr, ytr = dataframe_to_scikitsurv_ds(df_tr._with_batch_features(df_tr))
-        Xte, yte = dataframe_to_scikitsurv_ds(df_te._with_batch_features(df_te))
+        Xtr, ytr = dataframe_to_scikitsurv_ds(self._with_batch_features(df_tr))
+        Xte, yte = dataframe_to_scikitsurv_ds(self._with_batch_features(df_te))
 
         # =================== Train Model ====================
         params = params or self.get_best_params()

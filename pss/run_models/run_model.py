@@ -110,7 +110,7 @@ def train_over_subsets(
                     print("No existing Optuna study found. Default hyperparameters will be used.") 
    
             # ============== Train with best hyperparameters =============
-            duration,tr_brier, te_brier, tr_cind, te_cind = pipeline.train(train_sub, test_sub)
+            duration,tr_brier, te_brier, tr_cind, te_cind = pipeline.train(train_df=train_sub, test_df=test_sub)
             
             model_results.append({
                 "n train": int(n),
