@@ -1,0 +1,11 @@
+numpy>=1.24
+pandas>=1.5
+scikit-learn>=1.2.2
+scikit-survival>=0.21.0
+optuna>=4.4
+torch>=2.0
+torchtuples
+sklearn-pandas
+matplotlib
+scipy
+numba

@@ -49,5 +49,6 @@
     }
   },
   "filePath": "models",
-  "fileName": "model_results_test.csv"
+  "fileName": "model_results_test.csv",
+  "stratified": true
 }

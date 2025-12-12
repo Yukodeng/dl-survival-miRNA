@@ -129,7 +129,7 @@ class DeepSurvPipeline(TunablePipelineBase, ResultsWriterMixin):
                 selected evenly throughout min and max survival time in the train and test data.
         """
         # ==================== Prepare data ====================
-        def _preprocess_data(self, df, mapper=None, fit_scaler=True):
+        def _preprocess_data(df, mapper=None, fit_scaler=True):
             """ 
             Applies StandardScaler() to the input data features and re-format outcome to tuples. 
             """
@@ -150,13 +150,14 @@ class DeepSurvPipeline(TunablePipelineBase, ResultsWriterMixin):
             
             return x, y, mapper
        
-        train_df = train_df.drop(columns=self.batch_col)
-        val_df = val_df.drop(columns=self.batch_col)
-        x_train, y_train, mapper = _preprocess_data(train_df, fit_scaler=True)
-        x_val, y_val, _ = _preprocess_data(val_df, mapper=mapper, fit_scaler=False)
-        
         batch_ids_train = train_df[self.batch_col].to_numpy().reshape(-1)
         batch_ids_val = val_df[[self.batch_col]].to_numpy().reshape(-1)
+        
+        train_df = train_df.drop(columns=self.batch_col)
+        val_df = val_df.drop(columns=self.batch_col)
+        x_train, y_train, mapper = _preprocess_data(df=train_df)
+        x_val, y_val, _ = _preprocess_data(df=val_df, mapper=mapper, fit_scaler=False)
+        
         
         # ==================== GPU integration ====================
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -221,8 +222,6 @@ class DeepSurvPipeline(TunablePipelineBase, ResultsWriterMixin):
         if self.is_stratified:
             train_dataset = StratifiedDataset(x_train, durations_train, events_train, batch_ids_train)
             val_dataset = StratifiedDataset(x_val, durations_val, events_val, batch_ids_val)
-            # train_dataset = torch.utils.data.TensorDataset(x_train, durations_train, events_train, batch_ids_train)
-            # val_dataset   = torch.utils.data.TensorDataset(x_val, durations_val, events_val, batch_ids_val)
             train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
             val_loader   = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
             
@@ -308,4 +307,4 @@ class DeepSurvPipeline(TunablePipelineBase, ResultsWriterMixin):
 
         params = params or self.get_best_params()
 
-        return self._trainer(tr_df, te_df, params=params, verbose=False)
+        return self._trainer(train_df=tr_df, val_df=te_df, params=params, verbose=False)
