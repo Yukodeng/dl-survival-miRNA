@@ -99,7 +99,8 @@ class _CoxBase(base.SurvBase):
                 
         input = tt.tuplefy(input).to_numpy().iloc[df.index.values]
         # update 10/27: add batch ids
-        batch_ids = batch_ids[df.index.values] if batch_ids is not None else None #np.repeat(1, len(df))
+        batch_ids = batch_ids if batch_ids is not None else None
+        # batch_ids = batch_ids[df.index.values] if batch_ids is not None else None #np.repeat(1, len(df))
         base_haz = self._compute_baseline_hazards(input, df, batch_ids, max_duration, batch_size,
                                                   eval_=eval_, num_workers=num_workers)
         if set_hazards:

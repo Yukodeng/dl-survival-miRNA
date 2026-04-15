@@ -3,17 +3,56 @@ from typing import Sequence
 import numpy as np
 import pandas as pd
 import optuna
-from sklearn.model_selection import train_test_split
+from ..utils.loading import load_prepared_split
+
+def _make_rows(
+    *,
+    batchNormType: str,
+    data_type: str,
+    n_train: int,
+    iter_i: int,
+    stratified: bool,
+    model: str,
+    train_cind: float,
+    test_cind: float,
+    train_ibs: float,
+    test_ibs: float
+) -> list[dict]:
+    batch_type, norm_type = batchNormType.split("_", 1)  # "BE..", "norm.."
+
+    base = dict(
+        batch_type=batch_type,
+        norm_type=norm_type,
+        data_type=str(data_type),
+        n_train=int(n_train),
+        iter=int(iter_i),
+        stratified=bool(stratified),
+        model=str(model),
+    )
+
+    return [
+        {
+            **base,
+            "dataset": "train",
+            "cind": float(train_cind),
+            "ibs": float(train_ibs),
+        },
+        {
+            **base,
+            "dataset": "test",
+            "cind": float(test_cind),
+            "ibs": float(test_ibs),
+        }
+    ]
 
 
 def train_over_subsets(
     pipeline,
     *,
-    test_size: int = 1000,
-    subset_sizes: Sequence[int]=[100,500,1000,2000,5000,10000],
-    runs_per_size: Sequence[int]=[20,20,20,20,20,20],
-    splits_per_size: Sequence[int]=[3,5,5,10,10,10],
-    trials_per_size: Sequence[int]=[30,30,30,30,30,30],
+    subset_sizes: Sequence[int]=[100,200,500,1000,2000,5000,10000],
+    runs_per_size: Sequence[int]=[20,20,20,20,20,20,20],
+    splits_per_size: Sequence[int]=[3,5,5,5,10,10,10],
+    trials_per_size: Sequence[int]=[30,30,30,30,30,30,30],
     run_seeds: Sequence[int] | None = None, ## update 7/28 (YD): specify seeds for iterations
     trial_threshold: int = 30,
     n_jobs: int = 1,
@@ -55,19 +94,17 @@ def train_over_subsets(
     Examples
     --------
     """
-    train_df, test_df = pipeline.train_df, pipeline.test_df
-
     model_results = []
     for n, n_runs, n_splits, n_trials in zip(subset_sizes, runs_per_size, splits_per_size, trials_per_size):
-        
+
         print(f"Running for training size N={n}...")
-            
+
         # Apply flexible early stopping based on training sample size
         if hasattr(pipeline, "early_stop_per_size"):
             stop_params = pipeline.early_stop_per_size.get(str(n), {})
             pipeline.patience = stop_params.get("patience", 30)
             pipeline.min_delta = stop_params.get("min_delta", 1e-3)
-        
+
         # ======== Run multiple iterations with custom random seeds ========
         seeds = run_seeds if run_seeds is not None else list(range(n_runs))
         if len(seeds) != n_runs:
@@ -75,28 +112,19 @@ def train_over_subsets(
             seeds = list(range(n_runs))
         
         run_time, run_train_cind, run_test_cind, run_train_brier, run_test_brier = [],[],[],[],[]
-        for run in seeds:
-            if n < train_df.shape[0]:
-                train_sub, _ = train_test_split(
-                    train_df, train_size=n, 
-                    stratify=train_df[[pipeline.status_col, pipeline.batch_col]],
-                    shuffle=True, 
-                    random_state=run
-                )
-            else:
-                train_sub = train_df
-           
-            test_sub, _  = train_test_split(
-                test_df, train_size=test_size,
-                stratify=test_df[[pipeline.status_col, pipeline.batch_col]],
-                shuffle=True, 
-                random_state=run
+        for iter_i in range(1, len(seeds) + 1):
+
+            train_df, test_df = load_prepared_split(
+                pipeline.batchNormType, 
+                pipeline.dataName,
+                n, iter_i,
+                keep_batch=True
             )
-            
+
             # ================== Tune hyperparameters ====================
             if is_tune:
                 _ = pipeline.tune_hyperparameters(
-                    train_sub, n_samples=n, n_splits=n_splits, n_trials=n_trials, 
+                    train_df, n_samples=n, n_splits=n_splits, n_trials=n_trials, 
                     trial_threshold=trial_threshold, n_jobs=n_jobs
                 )
             else:
@@ -110,16 +138,53 @@ def train_over_subsets(
                     print("No existing Optuna study found. Default hyperparameters will be used.") 
    
             # ============== Train with best hyperparameters =============
-            duration,tr_brier, te_brier, tr_cind, te_cind = pipeline.train(train_df=train_sub, test_df=test_sub)
+            duration, tr_brier, te_brier, tr_cind, te_cind = pipeline.train(train_df=train_df, test_df=test_df)
             
-            model_results.append({
-                "n train": int(n),
-                "train time": float(duration),
-                "train C": float(tr_cind),
-                "test C": float(te_cind),
-                "train brier": float(tr_brier),
-                "test brier": float(te_brier)
-            })
+            # [TO UPDATE] Add function to directly append to results csv each iteration 
+            rows = _make_rows(
+                batchNormType=str(pipeline.batchNormType),
+                data_type=str(pipeline.dataName),
+                n_train=int(n),
+                iter_i=int(iter_i),
+                stratified=bool(pipeline.is_stratified),
+                model=str(pipeline.modelString),
+                train_cind=tr_cind,
+                test_cind=te_cind,
+                train_ibs=tr_brier,
+                test_ibs=te_brier
+            )
+            # append to meta results df for returning at the end of the function
+            model_results.extend(rows)
+            if is_save:
+                pipeline.write_rows(rows, file_path=file_path, file_name=file_name, sep="\t", append=True)
+
+            # optionally keep in-memory too (small overhead)
+            # model_results.extend(rows)
+            # model_results.append({ # Train
+            #     "norm_type": str(pipeline.batchNormType), 
+            #     "data_type": str(pipeline.dataName),
+            #     "n_train": int(n),
+            #     "iter": int(iter_i),
+            #     "train_time": float(duration),
+            #     "stratified": bool(pipeline.is_stratified),
+            #     "model": str(pipeline.modelString),
+            #     "dataset": "train",
+            #     "cind": float(tr_cind),
+            #     "ibs": float(tr_brier)
+            # })
+            # model_results.append({ # Test
+            #     "norm_type": str(pipeline.batchNormType), 
+            #     "data_type": str(pipeline.dataName),
+            #     "n_train": int(n),
+            #     "iter": int(iter_i),
+            #     "train_time": float(duration),
+            #     "stratified": bool(pipeline.is_stratified),
+            #     "model": str(pipeline.modelString),
+            #     "dataset": "test",
+            #     "cind": float(te_cind),
+            #     "ibs": float(te_brier)
+            # })
+            
             run_train_cind.append(tr_cind)
             run_test_cind.append(te_cind)
             run_train_brier.append(tr_brier)
@@ -136,8 +201,6 @@ def train_over_subsets(
             (Brier)  Train: {round(np.nanmean(run_train_brier),3)}, Test: {round(np.nanmean(run_test_brier),3)} (Mean)\n"
         )                
     
-    model_results = pd.DataFrame(model_results)  
-    if is_save:
-        pipeline.write(model_results=model_results, file_path=file_path, file_name=file_name)
+    model_results = pd.DataFrame(model_results)
 
     return model_results

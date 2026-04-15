@@ -33,7 +33,7 @@ class MLSurvivalPipeline(TunablePipelineBase, ResultsWriterMixin):
         test_df (pd.DataFrame): Testing data
         time_col (str): Default ``time``
         status_col (str): Default ``status``
-        batch_col (str): Default ``batch.id``
+        batch_col (str): Default ``batch_id``
         hyperparameters (Dict[str), Any] | None = None): Optuna-compatible hyperparameter search space
         storage_url (str): Default ``sqlite:///survmodels-hp-log.db``
         is_stratified (bool): Whether to apply 
@@ -50,7 +50,7 @@ class MLSurvivalPipeline(TunablePipelineBase, ResultsWriterMixin):
         is_stratified: bool = False,
         time_col: str = "time",
         status_col: str = "status",
-        batch_col: str = "batch.id",
+        batch_col: str = "batch_id",
         hyperparameters: Dict[str, Any] | None = None,
         storage_url: str = "sqlite:///survmodels-hp-log.db"
     ):
@@ -84,7 +84,7 @@ class MLSurvivalPipeline(TunablePipelineBase, ResultsWriterMixin):
             return df.drop(columns=[self.batch_col])
         
         # ---- stratified (one-hot encode batch id) ----
-        ## NOTE: implement naive approach of batch stratification by including batch.id as predictor
+        ## NOTE: implement naive approach of batch stratification by including batch_id as predictor
         return pd.get_dummies(
             df,
             columns=[self.batch_col],

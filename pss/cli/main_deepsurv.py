@@ -5,12 +5,12 @@ import json
 import logging
 import argparse
 import torch
-from ..utils.loading import load_simulate_survival_data, create_logger
+
+from ..utils.loading import create_logger
 from ..run_models import DeepSurvPipeline, train_over_subsets
 
 import warnings
 warnings.filterwarnings("ignore")
-
 
 def run_with_config(config_path):
     """
@@ -22,7 +22,7 @@ def run_with_config(config_path):
         "keywords": [""],
         "time_col": "time",
         "status_col": "status",
-        "batch_col": "batch.id",
+        "batch_col": "batch_id",
         "keep_batch": true,
         "hyperparameters": {
             "num_nodes": {"type": "categorical", "choices": [[64, 32], [32, 16], [32]]},
@@ -45,7 +45,7 @@ def run_with_config(config_path):
     # =============== Load Config ================  
     with open(config_path) as f:
         config = json.load(f)
-        
+    # config_path = "configs/BE10Asso00_normNone/BE10Asso00_normNone-linear-moderate.json"
     # ============== Setup Logging ===============
     # today = datetime.now().strftime("%m%d%y")
     log_filename = f"{config['batchNormType']}-{config['dataName']}.log"
@@ -60,20 +60,13 @@ def run_with_config(config_path):
         logger.info("GPU is not available, using CPU instead")
     
     # ================= Load Data ================ 
-    logger.info("Loading miRNAseq dataset %s-%s...", config['batchNormType'], config['dataName'])
-    train_df, test_df = load_simulate_survival_data(
-        batchNormType=config["batchNormType"],
-        dataName=config["dataName"],
-        keywords=config["keywords"], 
-        keep_batch=True
-    )
-    logger.info("Train shape: %s | Test shape: %s", train_df.shape, test_df.shape)
-    
+    # # load big matrix once
+    # x_raw = pd.read_parquet(os.path.join("raw-data", "simGeneExp_full.parquet"))
+
     # ============ Training Settings ============= 
     # Initialize pipeline
     dl = DeepSurvPipeline(
-        train_df=train_df,
-        test_df=test_df,
+        train_df=None, test_df=None,
         batchNormType=config['batchNormType'],
         dataName=config['dataName'],
         is_stratified=config.get('stratified', False),

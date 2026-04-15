@@ -25,7 +25,7 @@ class DeepSurvPipeline(TunablePipelineBase, ResultsWriterMixin):
         test_df (pd.DataFrame): Testing data
         time_col (str): Default ``time``
         status_col (str): Default ``status``
-        batch_col (str): Default ``batch.id``
+        batch_col (str): Default ``batch_id``
         hyperparameters (Dict[str), Any] | None = None): Optuna-compatible hyperparameter search space
         storage_url (str): Default ``sqlite:///survmodels-hp-log.db``
         is_stratified (bool): Whether to apply 
@@ -39,7 +39,7 @@ class DeepSurvPipeline(TunablePipelineBase, ResultsWriterMixin):
         is_stratified: bool = False,
         time_col: str = "time",
         status_col: str = "status",
-        batch_col: str = "batch.id",
+        batch_col: str = "batch_id",
         hyperparameters: Dict[str, Any] | None = None,
         storage_url: str = "sqlite:///deepsurv-torch-hp-log.db"
     ):
@@ -129,6 +129,9 @@ class DeepSurvPipeline(TunablePipelineBase, ResultsWriterMixin):
                 selected evenly throughout min and max survival time in the train and test data.
         """
         # ==================== Prepare data ====================
+        def _parse_num_nodes(s):
+            return [int(x) for x in s.split("-")]
+
         def _preprocess_data(df, mapper=None, fit_scaler=True):
             """ 
             Applies StandardScaler() to the input data features and re-format outcome to tuples. 
@@ -151,7 +154,7 @@ class DeepSurvPipeline(TunablePipelineBase, ResultsWriterMixin):
             return x, y, mapper
        
         batch_ids_train = train_df[self.batch_col].to_numpy().reshape(-1)
-        batch_ids_val = val_df[[self.batch_col]].to_numpy().reshape(-1)
+        batch_ids_val = val_df[self.batch_col].to_numpy().reshape(-1)
         
         train_df = train_df.drop(columns=self.batch_col)
         val_df = val_df.drop(columns=self.batch_col)
@@ -181,7 +184,8 @@ class DeepSurvPipeline(TunablePipelineBase, ResultsWriterMixin):
             
         input_size = x_train.shape[1]
         output_size = 1
-        num_nodes = params.get("num_nodes", [32,16])            # Default num of layers & nodes
+        num_nodes = params.get("num_nodes", "32-16")            # Default num of layers & nodes
+        num_nodes = _parse_num_nodes(num_nodes)
         dropout = params.get("dropout", 0.1)                    # Default dropout rate
         learning_rate = params.get("learning_rate", 1e-3)       # Default learning rate
         batch_size = params.get("batch_size", 128)              # Default batch size
@@ -223,7 +227,7 @@ class DeepSurvPipeline(TunablePipelineBase, ResultsWriterMixin):
             train_dataset = StratifiedDataset(x_train, durations_train, events_train, batch_ids_train)
             val_dataset = StratifiedDataset(x_val, durations_val, events_val, batch_ids_val)
             train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-            val_loader   = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+            val_loader   = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
             
             model = CoxPHStratified(net, optimizer)
             _ = model.fit_dataloader(
@@ -251,20 +255,24 @@ class DeepSurvPipeline(TunablePipelineBase, ResultsWriterMixin):
         
         # ==================== Evaluation ====================
         # Convert torch tensors back to numpy objects for evaluation
+        x_train_np = x_train.detach().cpu().numpy()
+        x_val_np = x_val.detach().cpu().numpy()
         durations_train_np = durations_train.detach().cpu().numpy()
         durations_val_np   = durations_val.detach().cpu().numpy()
         events_train_np    = events_train.detach().cpu().numpy()
         events_val_np      = events_val.detach().cpu().numpy()
+        batch_ids_train_np = batch_ids_train.detach().cpu().numpy()
+        batch_ids_val_np   = batch_ids_val.detach().cpu().numpy()
 
         # Compute baseline hazards (single stratum or per-batch)
         if self.is_stratified:
-            _ = model.compute_baseline_hazards(input=x_train, target=(durations_train, events_train), batch_ids=batch_ids_val)   
-            tr_surv  = model.predict_surv_df(x_train, batch_ids=batch_ids_train)
-            val_surv = model.predict_surv_df(x_val, batch_ids=batch_ids_val)
+            _ = model.compute_baseline_hazards(input=x_train_np, target=(durations_train_np, events_train_np), batch_ids=batch_ids_train_np)   
+            tr_surv  = model.predict_surv_df(x_train_np, batch_ids=batch_ids_train_np)
+            val_surv = model.predict_surv_df(x_val_np, batch_ids=batch_ids_val_np)
         else:
-            _ = model.compute_baseline_hazards(input=x_train, target=(durations_train, events_train)) 
-            tr_surv  = model.predict_surv_df(x_train)
-            val_surv = model.predict_surv_df(x_val)  
+            _ = model.compute_baseline_hazards(input=x_train_np, target=(durations_train_np, events_train_np)) 
+            tr_surv  = model.predict_surv_df(x_train_np)
+            val_surv = model.predict_surv_df(x_val_np)  
             
         # Initialize EvalSurv objects 
         tr_ev = EvalSurv(tr_surv, durations_train_np, events_train_np, censor_surv='km')
@@ -272,8 +280,8 @@ class DeepSurvPipeline(TunablePipelineBase, ResultsWriterMixin):
         
         # Concordance index (C-index) --------------
         if self.is_stratified:
-            tr_c_index  = tr_ev.stratified_concordance_td(batch_indices=batch_ids_train) 
-            val_c_index = val_ev.stratified_concordance_td(batch_indices=batch_ids_val) 
+            tr_c_index  = tr_ev.stratified_concordance_td(batch_indices=batch_ids_train_np) 
+            val_c_index = val_ev.stratified_concordance_td(batch_indices=batch_ids_val_np) 
         else:
             tr_c_index, _  = tr_ev.concordance_td() 
             val_c_index, _ = val_ev.concordance_td() 
@@ -284,8 +292,8 @@ class DeepSurvPipeline(TunablePipelineBase, ResultsWriterMixin):
         times = np.linspace(min_surv, max_surv, 20)
         
         if self.is_stratified:
-            tr_brier  = tr_ev.stratified_integrated_brier_score(time_grid=times, batch_indices=batch_ids_train) 
-            val_brier = val_ev.stratified_integrated_brier_score(time_grid=times, batch_indices=batch_ids_val)
+            tr_brier  = tr_ev.stratified_integrated_brier_score(time_grid=times, batch_indices=batch_ids_train_np) 
+            val_brier = val_ev.stratified_integrated_brier_score(time_grid=times, batch_indices=batch_ids_val_np)
         else:
             tr_brier  = tr_ev.integrated_brier_score(time_grid=times) 
             val_brier = val_ev.integrated_brier_score(time_grid=times) 
