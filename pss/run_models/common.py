@@ -1,12 +1,12 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, Sequence
+from typing import Dict, Any, Optional, Sequence, Iterable, Mapping
 from datetime import datetime
 import os
+import time
 import pandas as pd
 import numpy as np
 import optuna
-
 
 def _model_string(model_type: str, is_stratified: bool) -> str:
     return f"{'stratified-' if is_stratified else ''}{model_type}"
@@ -89,15 +89,16 @@ class TunablePipelineBase(ABC):
         self,
         df: pd.DataFrame,
         n_samples: int,
-        params: Dict[str, any] | None = None,
+        params: Dict[str, Any] | None = None,
         n_trials: int = 30,
         n_splits: int = 5,
         n_jobs: int = 1,
         trial_threshold: int = 30,
         timeout: Optional[int] = 2400,
+        max_retry: int = 5,
         extra_name_parts: Optional[Sequence[str]] = None,
         **objective_kwargs,
-    ) -> optuna.study.Study:
+    ) -> Optional[optuna.study.Study]:
         """
         Perform hyperparameter tuning within the k-fold CV framework using the Optuna library.
         Automatically stores tuning results or retrieves from existing studies to avoid duplicate optimization processes. 
@@ -118,29 +119,65 @@ class TunablePipelineBase(ABC):
             raise ValueError("Hyperparameters search space is empty.")
 
         study_name = self._study_name(n_samples, extra_name_parts)
-        try:          
-            study = optuna.load_study(study_name=study_name, storage=self.storage_url)
-            self._best_params = study.best_params
-            print(f"✅Retrieved best hyperparameters from existing study '{study_name}': {study.best_params}")
-            return study
-        
-        except Exception:
-            print(f"⚠️No Optuna study '{study_name}' found. Start hyperparameter tuning...")
-            study = optuna.create_study(
-                direction=self._direction(),
-                storage=self.storage_url,
-                study_name=study_name,
-                load_if_exists=True
-            )
+
+        study = None
+        for attempt in range(max_retry):
+            try:
+                study = optuna.create_study(
+                    direction=self._direction(),
+                    storage=self.storage_url,
+                    study_name=study_name,
+                    load_if_exists=True)
+                break
+            except Exception as e:
+                msg = str(e).lower()
+                if "database is locked" in msg:
+                    wait_time = 2 ** (attempt + 1)
+                    print(
+                        f"⚠️Optuna storage busy for study '{study_name}'"
+                        f"(attempt {attempt + 1}/{max_retry}). Retrying in {wait_time:.1f}s...")
+                    time.sleep(wait_time)
+                else:
+                    raise
+
+        if study is None:
+            print(f"❌Failed to access Optuna study '{study_name}' after {max_retry} retries. Skipping this condition.")
+            return None
+
         # Reuse already-completed trials to avoid re-tuning
         successful = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
         fixed_params = study.best_params if len(successful) >= trial_threshold else {}
-        new_space = {k: v for k, v in self.hyperparameters.items() if k not in fixed_params}
-
+        new_space = {k: v for k, v in params.items() if k not in fixed_params}
         if len(new_space) == 0:
             self._best_params = fixed_params
-            print(f"All hyperparameters already tuned: {self._best_params}\nSkipping optimization...")
-            return study
+            print(f"✅Retrieved best hyperparameters from study '{study_name}': {study.best_params}")
+        elif len(successful) == 0:
+            print(f"⚠️No completed trials in Optuna study '{study_name}'. Start hyperparameter tuning...")
+        else:
+            print(f"ℹ️Found existing study with {len(successful)} completed trials. Continue tuning...")
+    
+        # try:          
+        #     study = optuna.load_study(study_name=study_name, storage=self.storage_url)
+        #     self._best_params = study.best_params
+        #     print(f"✅Retrieved best hyperparameters from existing study '{study_name}': {study.best_params}")
+        #     return study 
+        # except Exception:
+        #     print(f"⚠️No Optuna study '{study_name}' found. Start hyperparameter tuning...")
+        #     study = optuna.create_study(
+        #         direction=self._direction(),
+        #         storage=self.storage_url,
+        #         study_name=study_name,
+        #         load_if_exists=True
+        #     )
+        # # Reuse already-completed trials to avoid re-tuning
+        # successful = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+        # fixed_params = study.best_params if len(successful) >= trial_threshold else {}
+        # new_space = {k: v for k, v in self.hyperparameters.items() if k not in fixed_params}
+
+        # if len(new_space) == 0:
+        #     self._best_params = fixed_params
+        #     print(f"All hyperparameters already tuned: {self._best_params}\nSkipping optimization...")
+        #     return study
 
         def _suggest(trial: optuna.trial.Trial, space: Dict[str, Any]) -> Dict[str, Any]:
             """ Convert a dictionary of hyperparameter ranges into Optuna-compatible format.
@@ -219,7 +256,7 @@ class TunablePipelineBase(ABC):
         """Return a metric to maximize (e.g., mean C-index across folds)."""
         raise NotImplementedError
 
-    def _study_name(self, n_samples: int, parts: str = []) -> str:
+    def _study_name(self, n_samples: int, parts: Optional[Sequence[str]] = None) -> str:
         suffix = "-".join([str(n_samples)] + list(parts or []))
         return f"{self.batchNormType}-{self.dataName}-{self.modelString}-{suffix}"
 
@@ -227,19 +264,21 @@ class TunablePipelineBase(ABC):
         return "maximize"
     
 
-
+# [UPDATE] 4/15/2026
 class ResultsWriterMixin:
     """
-    Mixin that adds .write(df, ...) to save model results to:
-        models/<batchNormType>/<dataName>/<modelString>/model_results_MMDDYY.csv
+    Mixin that adds .write_rows(...) to save model results to:
+      results/models/<batchNormType>/<dataName>/<modelString>/model_results_all_MMDDYY.tsv
+
+    Appends rows immediately (header written once).
     """
-    def write(self, 
-              model_results: pd.DataFrame, *,
-              root = "models",
-              file_path: str | None = None,
-              file_name: str | None = None,
-              append: bool = True
-    ):
+    def _default_out_path(
+        self,
+        *,
+        root: str = "results/models",
+        file_path: str | None = None,
+        file_name: str | None = None
+    ) -> str:
         parts = [
             getattr(self, "batchNormType", None),
             getattr(self, "dataName", None),
@@ -250,13 +289,36 @@ class ResultsWriterMixin:
         os.makedirs(out_dir, exist_ok=True)
 
         today = datetime.now().strftime("%m%d%y")
-        file_name = f'model_results_{today}.csv' if file_name is None else file_name
+        file_name = f"model_results_all_{today}.csv" if file_name is None else file_name
         path = os.path.join(out_dir, file_name)
+        return path
 
-        exists = os.path.exists(path)
-        if path.endswith(".txt"):
-            model_results.to_csv(path, mode=("a" if (append and exists) else "w"), sep="\t",
-                      header=not exists, index=False)
+    def write_rows(
+        self,
+        rows: pd.DataFrame | Iterable[Mapping],
+        *,
+        root: str = "results/models",
+        file_path: str | None = None,
+        file_name: str | None = None,
+        append: bool = True,
+        sep: str = "\t",
+    ) -> str:
+        """
+        Append rows to a CSV file immediately.
+        Returns the output path.
+        """
+        if isinstance(rows, pd.DataFrame):
+            df = rows
         else:
-            model_results.to_csv(path, mode=("a" if (append and exists) else "w"),
-                      header=not exists, index=False)
+            df = pd.DataFrame(list(rows))
+
+        path = self._default_out_path(root=root, file_path=file_path, file_name=file_name)
+        exists = os.path.exists(path)
+        mode = "a" if (append and exists) else "w"
+        header = not exists
+        df.to_csv(path, mode=mode, sep=sep, header=header, index=False)
+        return path
+
+    # keep this funciton for compatibility with existing code in pipeline:
+    def write(self, model_results: pd.DataFrame, **kwargs) -> str:
+        return self.write_rows(model_results, **kwargs)

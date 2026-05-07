@@ -3,7 +3,7 @@ import os
 import sys
 import logging
 import argparse
-from ..utils.loading import load_simulate_survival_data, create_logger
+from ..utils.loading import create_logger
 from ..run_models import MLSurvivalPipeline, train_over_subsets
 
 import warnings
@@ -18,33 +18,22 @@ def run_with_args(args):
     log_path = os.path.join("logs", log_filename)
     logger = create_logger(log_path=log_path)
     
-    # =============== Load Data =============== 
-    logger.info("Loading miRNAseq dataset %s-%s...", args.batchNormType, args.dataName)    
-    train_df, test_df = load_simulate_survival_data(
-        batchNormType=args.batchNormType,
-        dataName=args.dataName,
-        keywords=args.keywords.split(","),
-        keep_batch=args.keep_batch
-    )
-    logger.info("Train shape: %s | Test shape: %s", train_df.shape, test_df.shape)
-
 
     # ============ Run Training Pipeline ============ 
     
     # Initialize survival model class
     ml = MLSurvivalPipeline(
         model_type=args.modelType,
-        train_df=train_df,
-        test_df=test_df,
+        train_df=None, test_df=None,
         batchNormType=args.batchNormType,
         dataName=args.dataName,
         is_stratified=args.is_stratified
     )
     
-    subset_sizes = [int(x) for x in args.subsets.split(",")] if args.subsets else [100, 500, 1000, 2000, 5000, 10000]
+    subset_sizes = [int(x) for x in args.subsets.split(",")] if args.subsets else [100, 200, 500, 1000, 2000, 5000, 10000]
     runs_per_size = [int(x) for x in args.runs.split(",")] if args.runs else [20]*len(subset_sizes)
     run_seeds = [int(x) for x in args.seeds.split(",")] if args.seeds else None
-    splits_per_size = [int(x) for x in args.splits.split(",")] if args.splits else [3,5,5,10,10,10]
+    splits_per_size = [int(x) for x in args.splits.split(",")] if args.splits else [3,5,5,5,10,10,10]
     trials_per_size = [int(x) for x in args.trials.split(",")] if args.trials else [20]*len(subset_sizes)
     
     logger.info("Launching training pipeline with subset sizes %s..." % subset_sizes)
@@ -75,7 +64,7 @@ def main():
     parser = argparse.ArgumentParser(description="PRECISION.seq.survival - Run ML survival model pipelines.")
     parser.add_argument("--batchNormType", type=str, required=True, help="Batch effects and normalization type (e.g., BE00Asso00_normNone)")
     parser.add_argument("--dataName", type=str, required=True, help="Survival simulation type (e.g., linear-moderate)")
-    parser.add_argument("--modelType", type=str, required=True, choices=["coxnet", "svm", "rsf", "gb"], help="Model type")
+    parser.add_argument("--modelType", type=str, required=True, choices=["coxnet", "ssvm", "rsf", "sgb"], help="Model type")
     parser.add_argument("--keywords", type=str, default="", help="Keywords for input file search, comma-separated (optional)")
     parser.add_argument("--keep_batch", action="store_true", help="Keep batch column when loading input data", default=True)
     parser.add_argument("--subsets", type=str, help="Comma-separated training subset sizes (e.g., 100,500,1000,2000,5000,10000)")

@@ -24,21 +24,19 @@ The axes of experimental comparisons of data generation and survival modeling sc
 
     -   BE11Asso11
 
--   **Marker-survival association** (linear/nonlinear): 10 true miRNA markers were pre-selected based on expression abundance observed in the real-world sarcoma tumor samples and used for survival time simulation.
+-   **Marker-survival association** (linear/nonlinear): p=2, 5, 10, and 30 true miRNA markers and their corresponding effect sizes (beta coefficients) were pre-selected and pre-specified based on expression abundance observed in the real-world sarcoma tumor samples and used for survival time simulation.
 
-    -   Moderate linear association (**linear-moderate**): 10 markers with strong signals
+    -   Linear association (**linear**): linear combination of true markers
 
-    -   Weak linear association (**linear-weak**): 30 markers with weak, spread-out signals (20 additional markers randomly drawn from the remaining markers)
+    -   Nonlinear quadratic association (**nl-quadratic**): linear combination of standardized and squared true markers
 
-    -   Nonlinear quadratic association (**nl-quadratic**): 10 markers standardized
+    -   *(no longer include) Qudratic with shifted center by median (**nl-shiftquad**)*
 
-    -   *Qudratic with shifted center by median (**nl-shiftquad**) (**optional**)*
+    -   Sine transformation (**nl-sine**): linear combination of sine transformed true markers
 
-    -   Sine transformation (**nl-sine**): 10 true markers with sine transformation
+    -   Marker-marker **interaction** (**nl-interaction**): linear combination of true marker interaction terms with one randomly selected marker (included in the lits of true markers)
 
-    -   Marker-marker **interaction** (**nl-interaction**): 10 markers
-
-### **Depth Normalization & Survival Modeling**
+### **Harmonizatin & Survival Modeling**
 
 -   **Normalization methods**: Input should be the count data and output also count data
 
@@ -56,9 +54,11 @@ The axes of experimental comparisons of data generation and survival modeling sc
 
     -   Quantile Normalization (QN)\*
 
+-   **Batch Stratification**: For each simulation experiment, both stratified and non-stratified approaches were implemented for comparison.
+
 -   **Survival risk prediction models**:
 
-    -   Baseline CoxPH models (R)
+    -   Baseline CoxPH models (R {survival} {glmnet} implementations)
 
         -   **Oracle model** (i.e. Cox regression using the correct true predictors and the correct functional form)
 
@@ -78,7 +78,7 @@ The axes of experimental comparisons of data generation and survival modeling sc
 
         -   **DeepSurv**: PyTorch implementation of the CoxPH-based multi-layer feed-forward neural network ([DeepSurv](https://bmcmedresmethodol.biomedcentral.com/articles/10.1186/s12874-018-0482-1); <https://github.com/jaredleekatzman/DeepSurv>)
 
--   We additionally test out the effect of training sample size on prediction accuracy. For each simulation condition and survival modeling algorithm, a training sample size of 100, 500, 1000, 2000, 5000, and 10000† was utilized.
+-   We additionally test out the effect of training sample size on prediction accuracy. For each simulation condition and survival modeling algorithm, a training sample size of 100, 200, 500, 1000, 2000, 5000, and 10000† was utilized.
 
 *\*Input for QN is log2-transformed count values*
 
@@ -99,7 +99,7 @@ python3.10 -m venv <env-name>
     ## OS/Linux:
     source <env-name>/bin/activate
 
-    ## Windows:
+    ## Windows (Command Prompt):
     <env-name>\Scripts\activate.bat
 
 # Step 3: Install precision.seq.survival (pss) package
