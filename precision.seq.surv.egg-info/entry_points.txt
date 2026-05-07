@@ -1,3 +1,0 @@
-[console_scripts]
-pss-deepsurv = pss.cli.main_deepsurv:main
-pss-sksurv = pss.cli.main_sksurv:main
