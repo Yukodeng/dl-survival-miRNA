@@ -71,7 +71,8 @@ class TunablePipelineBase(ABC):
         dataName: Optional[str] = None,
         modelString: Optional[str] = None,
         hyperparameters: Optional[Dict[str, Any]] = None,
-        storage_url: str = "sqlite:///hp-log.db"
+        storage_url: str = "sqlite:///hp-log.db",
+        today: str | None = None
     ):
         self.hyperparameters = hyperparameters or {}
         self.storage_url = storage_url
@@ -81,6 +82,7 @@ class TunablePipelineBase(ABC):
         self.batchNormType = batchNormType
         self.dataName = dataName
         self.modelString = modelString#_model_string(model_typee, is_stratified)  # set in subclass if computed from flags
+        self.today = today or datetime.now().strftime("%m%d%y")
         
     # ----------------------------------------------------------------
     # Wrapper for _suggest and _wrapped_objective functions for tuning
@@ -148,9 +150,12 @@ class TunablePipelineBase(ABC):
         successful = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
         fixed_params = study.best_params if len(successful) >= trial_threshold else {}
         new_space = {k: v for k, v in params.items() if k not in fixed_params}
+        
         if len(new_space) == 0:
             self._best_params = fixed_params
             print(f"✅Retrieved best hyperparameters from study '{study_name}': {study.best_params}")
+            return study
+
         elif len(successful) == 0:
             print(f"⚠️No completed trials in Optuna study '{study_name}'. Start hyperparameter tuning...")
         else:
@@ -288,7 +293,7 @@ class ResultsWriterMixin:
         out_dir = os.path.join(root, *parts) if file_path is None else file_path
         os.makedirs(out_dir, exist_ok=True)
 
-        today = datetime.now().strftime("%m%d%y")
+        today = getattr(self, "today", None) or datetime.now().strftime("%m%d%y")
         file_name = f"model_results_all_{today}.csv" if file_name is None else file_name
         path = os.path.join(out_dir, file_name)
         return path

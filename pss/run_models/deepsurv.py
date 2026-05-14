@@ -41,7 +41,8 @@ class DeepSurvPipeline(TunablePipelineBase, ResultsWriterMixin):
         status_col: str = "status",
         batch_col: str = "batch_id",
         hyperparameters: Dict[str, Any] | None = None,
-        storage_url: str = "sqlite:///deepsurv-torch-hp-log.db"
+        storage_url: str = "sqlite:///deepsurv-torch-hp-log.db",
+        today: str | None = None
     ):
         modelString = _model_string("deepsurv-torch", is_stratified)
         hyperparameters = _default_hp_space("deepsurv-torch") if hyperparameters is None else hyperparameters
@@ -50,7 +51,8 @@ class DeepSurvPipeline(TunablePipelineBase, ResultsWriterMixin):
             dataName=dataName, 
             modelString=modelString,
             hyperparameters=hyperparameters,
-            storage_url=storage_url
+            storage_url=storage_url,
+            today=today
             )
         self.train_df = train_df
         self.test_df = test_df

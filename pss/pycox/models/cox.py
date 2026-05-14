@@ -540,7 +540,7 @@ class CoxPHStratified(_CoxPHBase):
         - If `batch_ids` is None and a single baseline (pd.Series) is stored, we
           fall back to _CoxBase.predict_surv_df behavior.
         - If baseline hazards are a dict (stratified) but batch_ids is None,
-          we raise a clear error.
+          raise a clear error.
         """
         
         if baseline_hazards_ is None:

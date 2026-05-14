@@ -26,7 +26,6 @@ source("scripts/utils/norm.R")
 # [NOTE] First time: make sure to run script for simulating survial outcome
 # source("scripts/simulate-survival-outcome.R")
 
-date <- format(Sys.Date(), "%m%d%y")
 set.seed(1234)
 
 # Load Raw Augmented Gene Counts --------------------------------------------
@@ -67,6 +66,13 @@ alloc_counts <- function(n, n_batch, iter_i) {
 
   setNames(base + as.integer(batches %in% plus_one), batches)
 }
+
+# train_size=500
+# test_size=1000
+# iter_i=21
+# n_batch = 15
+# max_train_per_batch = ceiling(5000 / n_batch)
+# N = 20000
 
 extract_split_ids <- function(train_size, test_size, iter_i, max_train_per_batch, n_batch = 15, N = 20000) {
   key <- paste0("train", train_size, "_iter", iter_i)
@@ -138,10 +144,7 @@ x0_transform <- function(sim.dataType, x0, interact.gene = NULL) {
 plot_KM <- function(df) {
   fig <- survfit(
     Surv(time, status) ~ type,
-    data = rbind(
-      sim.train %>% dplyr::mutate(type = 'Train'),
-      sim.test %>% dplyr::mutate(type = 'Test')
-    ),
+    data = df,
     conf.type = "log-log") |>
     ggsurvfit() +
     labs(
@@ -309,25 +312,25 @@ metric_log_add <- function(
 # N = 20000; P = 538; n_batch = 15
 # test_size = 1000
 # max_train_size = 10000
-# sim.dataType = "linear"
-# p = 60
-# norm_type = 0
 # rho_cutoff = 0.9
-# train_sizes = c(100, 200)#, 500, 1000, 2000, 5000, 10000)
-# splits_per_size = c(3, 5)#, 5, 5, 10, 10, 10)
-# n_iter = 1
+# sim.dataType = stringr::str_split(dataType_list[1], "-p")[[1]][1]
+# p = stringr::str_split(dataType_list[1], "-p")[[1]][2]
+# train_sizes = c(100, 200, 500, 1000) #2000, 5000, 10000),
+# splits_per_size = c(3, 5, 5, 5) #10, 10, 10),
+# n_iter = 20
 # he_train = 0
 # he_test = 0
 # beta_sort_train = 0
 # beta_sort_test = 0
+# norm_type = 0
 # plot_km = T
-# save_surv_data = F
-# save_gene_data = F
+# save_surv_data = T
+# save_gene_data = T
 # run_analysis = T
 # stratify = 1
-# save_results = T
+# save_results = F
 # surv_folder = "sim_surv"
-# results_file = "model_results_pilot.csv"
+# results_file = "model_results_p30_v2.csv"
 sim.survdata <- function(
   sim.data,
   N = 20000, P = 538, n_batch = 15,
@@ -351,7 +354,8 @@ sim.survdata <- function(
   stratify = 1,
   save_results = T,
   surv_folder = "sim_surv",
-  results_file = NULL
+  results_file = NULL,
+  date = NULL
 ) {
   # get fixed chunk len per batch per iteration (max needed)
   max_train_per_batch <- ceiling(max_train_size / n_batch)
@@ -394,7 +398,7 @@ sim.survdata <- function(
   message(glue::glue("Starting simulation for {batchNormType}-{sim.dataType} (p={p})"))
 
   for (train_size in train_sizes) {
-# train_size=100
+# train_size=500
     n_splits <- splits_per_size[which(train_sizes == train_size)]
 
     for (iter_i in seq_len(n_iter)) {
@@ -778,8 +782,9 @@ sim.survdata <- function(
           coxph_l_test <- fit_coxph_safe(formula_l, x_test_sel, y_test, beta_init = b_l_sel)
           metrics_l_te <- cox_metrics( x_test_sel, y_test,coxph_l_test)
         }
-        
+
         if (stratify) {
+
           ## * ---- Oracle linear (strat) --------------------------
           formula <- as.formula(paste(
             "Surv(time, status) ~", paste(colnames(x0_train), collapse = "+"), "+ strata(batch_id)"

@@ -4,6 +4,7 @@ __pycache__/
 .vscode/
 logs/
 jobs/
+configs/
 
 # saved models
 weight_checkpoint_*
