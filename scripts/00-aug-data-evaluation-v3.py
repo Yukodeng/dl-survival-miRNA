@@ -35,8 +35,6 @@ gindex = pd.read_csv(os.path.join("data", "augmentation_miRNA_names_538.csv"))['
 gnames_no1 = [g[:-2] for g in gnames] # cleaned marker names
 
 
-# pd.DataFrame(gindex).to_csv("gindex.csv", row)
-
 
 # * True markers ----------------------------------
 nonzero_genes = ["hsa.miR.1277.3p.1", "hsa.miR.1277.5p.1", "hsa.miR.133a.2..1", "hsa.miR.144..1" , 
@@ -149,8 +147,22 @@ aug_clean.columns = aug_batch.columns = gnames
 aug_batch_obs = (aug_batch - aug_clean) 
 
 
-## * Mean vs. Stdev plot ----------------------
+## * Mean plot ----------------------
 
+### All batch
+fig, ax = plt.subplots(figsize=(5,4.5))
+df = pd.DataFrame({
+    'Before' : par_batch_obs.apply(np.mean),
+    'After' : aug_batch_obs.apply(np.mean)
+})
+sns.scatterplot(data=df, x="Before", y="After", marker='o', s=15, ax=ax)
+ax.set_xticks([-0.5, -0.25, 0, 0.25, 0.5, 0.75, 1, 1.25])
+ax.set_yticks([-0.5, -0.25, 0, 0.25, 0.5, 0.75, 1, 1.25])
+plt.show()
+plt.savefig(os.path.join(output_dir, f"scatter-mean-BE-par-vs-aug-{N}.png"), 
+            dpi=300, bbox_inches='tight')   
+            
+### Per batch
 nrow = int(np.ceil(n_batch / 4))
 fig, axes = plt.subplots(nrow, 4, figsize=(13, 3*nrow))
 c = 0
@@ -175,8 +187,23 @@ plt.show()
 plt.savefig(os.path.join(output_dir, f"scatter-mean-BE-per-batch-par-vs-aug-{N}.png"), 
             dpi=300, bbox_inches='tight')
 
-# stdev
 
+## * Stdev plot -----------------------------------
+
+### all batches
+fig, ax = plt.subplots(figsize=(5,4.5))
+df = pd.DataFrame({
+    'Before' : par_batch_obs.apply(np.std),
+    'After' : aug_batch_obs.apply(np.std)
+})
+sns.scatterplot(data=df, x="Before", y="After", marker='o', s=15, ax=ax)
+# ax.set_xticks([-0.5, -0.25, 0, 0.25, 0.5, 0.75, 1, 1.25])
+# ax.set_yticks([-0.5, -0.25, 0, 0.25, 0.5, 0.75, 1, 1.25])
+plt.show()
+plt.savefig(os.path.join(output_dir, f"scatter-stdev-BE-par-vs-aug-{N}.png"), 
+            dpi=300, bbox_inches='tight')   
+           
+### per batch
 nrow = int(np.ceil(n_batch / 4))
 fig, axes = plt.subplots(nrow, 4, figsize=(13, 3*nrow))
 c = 0
@@ -195,7 +222,6 @@ for i in range(nrow):
         else:
             axes[i,j].set_axis_off()
         c += 1
-
 plt.suptitle("Per-marker standard deviations of batch effects (log): before vs. after augmentation")
 plt.tight_layout()
 plt.show()
@@ -435,11 +461,14 @@ par_batch_sel['Type'] = 'Parametric'
 
 box_data = pd.concat([par_batch_sel, aug_batch_sel], axis=0)
 box_data['Mean BE'] = box_data.drop(columns=['Batch', 'Type']).mean(axis=1)
+box_data['Standard Deviation of BE'] = box_data.drop(columns=['Batch', 'Type']).std(axis=1)
+
 # box_data['Read Depth'] = box_data.drop(columns=['Batch', 'Type', "Read Depth (sub)"]).sum(axis=1)
 
 
 # Boxplot 
 
+# * Mean ------
 fig, ax = plt.subplots(1, 1, figsize = (7,6))
 sns.boxplot(data=box_data, x='Batch', y="Mean BE", hue='Type', palette=palette, ax=ax)
 ax.set_title("Per-marker mean batch effects (BE)")
@@ -448,5 +477,18 @@ plt.show()
 
 plt.savefig(
     os.path.join(output_dir, f'boxplot-per-marker-mean-BE-per-batch-{N}.png'), 
+    dpi=300
+)
+
+sns.reset_orig()
+
+# * Stdev -----
+fig, ax = plt.subplots(1, 1, figsize = (7,6))
+sns.boxplot(data=box_data, x='Batch', y="Standard Deviation of BE", hue='Type', palette=palette, ax=ax)
+# ax.set_title("Per-marker batch effects (BE)")
+plt.tight_layout()
+plt.show()
+plt.savefig(
+    os.path.join(output_dir, f'boxplot-per-marker-stdev-BE-per-batch-{N}.png'), 
     dpi=300
 )

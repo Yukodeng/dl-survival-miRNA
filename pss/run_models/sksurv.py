@@ -52,7 +52,8 @@ class MLSurvivalPipeline(TunablePipelineBase, ResultsWriterMixin):
         status_col: str = "status",
         batch_col: str = "batch_id",
         hyperparameters: Dict[str, Any] | None = None,
-        storage_url: str = "sqlite:///survmodels-hp-log.db"
+        storage_url: str = "sqlite:///survmodels-hp-log.db",
+        today: str | None = None
     ):
         modelString = _model_string(model_type, is_stratified)
         hyperparameters = _default_hp_space(model_type) if hyperparameters is None else hyperparameters
@@ -61,7 +62,8 @@ class MLSurvivalPipeline(TunablePipelineBase, ResultsWriterMixin):
             dataName=dataName, 
             modelString=modelString,
             hyperparameters=hyperparameters,
-            storage_url=storage_url
+            storage_url=storage_url,
+            today=today
             )
         self.model_type = model_type
         self.train_df = train_df

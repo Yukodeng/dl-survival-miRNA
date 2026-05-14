@@ -6,19 +6,18 @@ library(dplyr)
 library(glue)
 
 # ################################## Function ##################################
-
 generate_subFile <- function(sim.dataType = NULL, # E.g., "linear", "nl-quadratic"
-                          p_vec = c(2,5,10,30),
+                          p_vec = c("5-2x",5,10,30),
                           he_train = 0,
                           he_test = 0,
                           beta_sort_train = 0,
                           beta_sort_test = 0,
                           norm_type = 0,
                           keywords = NULL,
-                          subset_sizes = c(100,200,500,1000,2000,5000,10000),
-                          runs_per_size = c(20,20,20,20,20,20,20),
-                          splits_per_size = c(3,5,5,5,10,10,10),
-                          trials_per_size = c(30,30,30,50,50,50,50),
+                          subset_sizes = c(100,200,500,1000,5000),
+                          runs_per_size = c(20,20,20,20,20),
+                          splits_per_size = c(3,5,5,5,10),
+                          trials_per_size = c(30,30,30,50,50),
                           trial_threshold = 30,
                           GPUtype = 'l4') {
 
@@ -49,7 +48,6 @@ generate_subFile <- function(sim.dataType = NULL, # E.g., "linear", "nl-quadrati
   # Generate Slurm script for job submission -------------------------
   
   for (dataType in dataTypes_vec) {
-
     ## DL config file --------------------------------------
     dir.create(here::here('configs', batchNormType), recursive=T, showWarnings = F)
 
@@ -65,13 +63,13 @@ generate_subFile <- function(sim.dataType = NULL, # E.g., "linear", "nl-quadrati
       hyperparameters = list(
         num_nodes = list(
           type = "categorical",
-          choices = list(list(128), list(64), list(32), #list(16),
-                        c(128,64), c(64,32), c(32,16), 
-                        c(64,64,32), c(32,32,16))),
-        dropout = list(type = "float", low = 0.1, high = 0.5),
-        learning_rate = list(type = "float", low = 1e-4, high = 5e-3, log = TRUE),
-        weight_decay = list(type = "float", low = 1e-4, high = 5e-2, log = TRUE),
-        batch_size = list(type = "categorical", choices = c(32, 64, 128))
+          choices = list(
+            "128", "64", "32", "32-16", "64-32", "128-64", "64-64-32", "32-32-16")
+          ),
+        dropout = list(type = "float", low = 0.0, high = 0.4),
+        learning_rate = list(type = "float", low = 1e-5, high = 5e-3, log = TRUE),
+        weight_decay = list(type = "float", low = 1e-6, high = 5e-2, log = TRUE),
+        batch_size = list(type = "categorical", choices = c(32, 64, 128, 256))
       ),
       subset_sizes = subset_sizes,
       runs_per_size = runs_per_size,
@@ -86,11 +84,13 @@ generate_subFile <- function(sim.dataType = NULL, # E.g., "linear", "nl-quadrati
         `200` = list(patience = 20, min_delta = 5e-3),
         `500` = list(patience = 20, min_delta = 5e-3),
         `1000` = list(patience = 30, min_delta = 1e-3),
-        `2000` = list(patience = 30, min_delta = 5e-4),
-        `5000` = list(patience = 35, min_delta = 1e-4),
-        `10000` = list(patience = 40, min_delta = 1e-4)
+        # `2000` = list(patience = 30, min_delta = 5e-4),
+        `5000` = list(patience = 35, min_delta = 1e-4)#,
+        # `10000` = list(patience = 40, min_delta = 1e-4)
       )
     )
+
+    # [UNCOMMENT!] ----
     # Save to json files
     jsonlite::write_json(config, 
       here::here('configs', batchNormType, glue("{batchNormType}-{dataType}.json")), pretty=T, auto_unbox=T)
@@ -103,15 +103,25 @@ generate_subFile <- function(sim.dataType = NULL, # E.g., "linear", "nl-quadrati
     ## DL Slurm script --------------------------------------
 
     ## [UPDATE 09052025] updated gres=gpu: to gres=shard: per Venkat suggestion
-    bash.sub = glue("#!/bin/bash
-#SBATCH --job-name={batchNormType}-{dataType}{GPUtype}
+#     bash.sub = glue("#!/bin/bash
+# #SBATCH --job-name={batchNormType}-{dataType}{GPUtype}
+# #SBATCH --error=slurm-temp.log
+# #SBATCH --output=slurm-temp.log
+# #SBATCH --partition={tolower(GPUtype)}gpu
+# #SBATCH --qos={tolower(GPUtype)}gpu
+# #SBATCH --gres=shard:{toupper(GPUtype)}:1
+# #SBATCH --time=12:00:00
+
+     bash.sub = glue("#!/bin/bash
+#SBATCH --job-name={batchNormType}-{dataType}-epycQ
 #SBATCH --error=slurm-temp.log
 #SBATCH --output=slurm-temp.log
-#SBATCH --partition={tolower(GPUtype)}gpu
-#SBATCH --qos={tolower(GPUtype)}gpu
-#SBATCH --gres=shard:{toupper(GPUtype)}:1
-#SBATCH --time=12:00:00
-exec > >(tee -a jobs/deepsurv/logs/{batchNormType}/{batchNormType}-{dataType}{GPUtype}.log) 2>&1
+#SBATCH --partition=epycQ
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --time=24:00:00
+#SBATCH --mem=32G
+exec > >(tee -a jobs/deepsurv/logs/{batchNormType}/{batchNormType}-{dataType}-epycQ.log) 2>&1
 
 export CUDA_HOME=/opt/cuda118
 export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
@@ -211,9 +221,9 @@ exec > >(tee -a $LOGFILE) 2>&1
 source ~/dl-surv/bin/activate
 
 COMMON_ARGS='--batchNormType {batchNormType} --is_save --modelType rsf \\
---subsets 100,200,500,1000,2000,5000 \\
---runs 20,20,20,20,20,20 \\
---splits 3,5,5,5,10,10'
+--subsets 100,200,500,1000,5000 \\
+--runs 20,20,20,20,20 \\
+--splits 3,5,5,5,10'
 
 for DATA_NAME in {dataTypes_str}; do
   echo \"==================================================\"
@@ -225,34 +235,34 @@ done
 
 echo 'Congrats! All random survival forest (RSF) model runs completed.'")
   
-  ### RSF (8000) ---------------------------------
+#   ### RSF (8000) ---------------------------------
   
-  bash.sksurv.rsf.8000 <- glue("#!/bin/bash
-#SBATCH --job-name={batchNormType}-{sim.dataType}-8000
-#SBATCH --error=slurm-temp.log
-#SBATCH --output=slurm-temp.log
-#SBATCH --array=0-4%1
-#SBATCH --partition=epycQ
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --time=24:00:00
-#SBATCH --mem=64G
-exec > >(tee -a jobs/sksurv/logs/{batchNormType}/{batchNormType}-{sim.dataType}-rsf-8000.log) 2>&1
+#   bash.sksurv.rsf.8000 <- glue("#!/bin/bash
+# #SBATCH --job-name={batchNormType}-{sim.dataType}-8000
+# #SBATCH --error=slurm-temp.log
+# #SBATCH --output=slurm-temp.log
+# #SBATCH --array=0-4%1
+# #SBATCH --partition=epycQ
+# #SBATCH --nodes=1
+# #SBATCH --ntasks=1
+# #SBATCH --time=24:00:00
+# #SBATCH --mem=64G
+# exec > >(tee -a jobs/sksurv/logs/{batchNormType}/{batchNormType}-{sim.dataType}-rsf-8000.log) 2>&1
 
-source ~/dl-surv/bin/activate
+# source ~/dl-surv/bin/activate
 
-IDX=$SLURM_ARRAY_TASK_ID
-SEEDS=(0 1 2 3 4)
-FILE=\"model_results_8000.csv\"
+# IDX=$SLURM_ARRAY_TASK_ID
+# SEEDS=(0 1 2 3 4)
+# FILE=\"model_results_8000.csv\"
 
-pss-sksurv --batchNormType {batchNormType} --dataName {sim.dataType} \\
---subsets 8000 --runs 1 --seeds ${{SEEDS[$IDX]}} --fileName ${{FILE}} \\
---is_save --modelType rsf
-pss-sksurv --batchNormType {batchNormType} --dataName {sim.dataType} \\
---subsets 8000 --runs 1 --seeds ${{SEEDS[$IDX]}} --fileName ${{FILE}} \\
---is_save --modelType rsf --is_stratified
+# pss-sksurv --batchNormType {batchNormType} --dataName {sim.dataType} \\
+# --subsets 8000 --runs 1 --seeds ${{SEEDS[$IDX]}} --fileName ${{FILE}} \\
+# --is_save --modelType rsf
+# pss-sksurv --batchNormType {batchNormType} --dataName {sim.dataType} \\
+# --subsets 8000 --runs 1 --seeds ${{SEEDS[$IDX]}} --fileName ${{FILE}} \\
+# --is_save --modelType rsf --is_stratified
 
-echo 'Finished all RSF (N=8000) model runs.'")
+# echo 'Finished all RSF (N=8000) model runs.'")
   
   # [9/18/2025] save slurm script for GB models separately
   file.ssvm = here::here('jobs', 'sksurv', batchNormType, glue("{batchNormType}-{sim.dataType}-ssvm.sh"))
@@ -263,10 +273,11 @@ echo 'Finished all RSF (N=8000) model runs.'")
   dir.create(here::here('jobs', 'sksurv', batchNormType), recursive = TRUE, showWarnings = FALSE)
   dir.create(here::here('jobs', 'sksurv', 'logs', batchNormType), recursive = TRUE, showWarnings = FALSE)
 
-  writeLines(bash.sksurv.sgb, file.sgb)
-  writeLines(bash.sksurv.ssvm, file.ssvm)
-  writeLines(bash.sksurv.rsf, file.rsf)
-  # writeLines(bash.sksurv.rsf.8000, file.rsf.8000)
+  # [UNCOMMENT!] -------
+  # writeLines(bash.sksurv.sgb, file.sgb)
+  # writeLines(bash.sksurv.ssvm, file.ssvm)
+  # writeLines(bash.sksurv.rsf, file.rsf)
+  # # writeLines(bash.sksurv.rsf.8000, file.rsf.8000)
 
   cat('Done.\n+++++++++++++++++++++++++++++++++++++++++++++++\n')
 }
@@ -281,13 +292,11 @@ sim.dataType.vec <- c(
   "nl-interaction",
   "nl-sine"
 )
-p_vec <- c(2, 5, 10, 30)
-# dataType_combs <- expand.grid(dataType_vec, p_vec, stringsAsFactors = FALSE)
-# dataType_list <- paste(dataType_combs$Var1, dataType_combs$Var2, sep = "-p")
-subset_sizes = c(100,200,500,1000,2000,5000)
-runs_per_size = c(20,20,20,20,20,20)
-splits_per_size = c(3,5,5,5,10,10)
-trials_per_size = c(30,30,30,50,50,50)
+p_vec <- c("5-2x", 5, 10, 30)
+subset_sizes = c(100,200,500,1000,5000)
+runs_per_size = c(20,20,20,20,20)
+splits_per_size = c(3,5,5,5,10)
+trials_per_size = c(30,30,30,50,50)
 
 ## ############################# BE00Asso00 ###############################
 
@@ -360,116 +369,10 @@ for (norm_type in 0:6) {
   )
 }
 
-# ## ############################# BE10Asso10 ###############################
-
-# date = "072125"
-
-# for (norm_type in 0:6) {
-
-#   # Linear risk with moderate effects
-#   generate_subFile(sim.dataType='linear-moderate',
-#                    he_train=1,he_test=0,beta_sort_train=0.05,beta_sort_test=0,norm_type=norm_type,
-#                    date=date, GPUtype='l4')
-
-#   # Linear risk with weak effects
-#   generate_subFile(sim.dataType='linear-weak',
-#                    he_train=1,he_test=0,beta_sort_train=0.05,beta_sort_test=0,norm_type=norm_type,
-#                    date=date, GPUtype='l4')
-
-#   # Squared terms
-#   generate_subFile(sim.dataType='nl-quadratic',
-#                    he_train=1,he_test=0,beta_sort_train=0.05,beta_sort_test=0,norm_type=norm_type,
-#                    date=date, GPUtype='l4')
-
-#   # Squared terms with intercept
-#   generate_subFile(sim.dataType='nl-shiftquad',
-#                    he_train=1,he_test=0,beta_sort_train=0.05,beta_sort_test=0,norm_type=norm_type,
-#                    date=date, GPUtype='l4')
-
-#   # Gene-gene interaction terms
-#   generate_subFile(sim.dataType='nl-interaction',
-#                    he_train=1,he_test=0,beta_sort_train=0.05,beta_sort_test=0,norm_type=norm_type,
-#                    date=date, GPUtype='l4')
-
-#   # Sine interaction
-#   generate_subFile(sim.dataType='nl-sine',
-#                    he_train=1,he_test=0,beta_sort_train=0.05,beta_sort_test=0,norm_type=norm_type,
-#                    date=date, GPUtype='l4')
-# }
+## ############################# BE10Asso10 ###############################
 
 
-# ## ############################# BE11Asso10 ###############################
-# date = "091625"
-
-# for (norm_type in 0:6) {
-  
-#   # Linear risk with moderate effects
-#   generate_subFile(sim.dataType='linear-moderate',
-#                    he_train=1,he_test=1,beta_sort_train=0.05,beta_sort_test=0,norm_type=norm_type,
-#                    date=date, GPUtype='l4')
-  
-#   # Linear risk with weak effects
-#   generate_subFile(sim.dataType='linear-weak',
-#                    he_train=1,he_test=1,beta_sort_train=0.05,beta_sort_test=0,norm_type=norm_type,
-#                    date=date, GPUtype='l4')
-  
-#   # Squared terms
-#   generate_subFile(sim.dataType='nl-quadratic',
-#                    he_train=1,he_test=1,beta_sort_train=0.05,beta_sort_test=0,norm_type=norm_type,
-#                    date=date, GPUtype='l4')
-  
-#   # Squared terms with intercept
-#   generate_subFile(sim.dataType='nl-shiftquad',
-#                    he_train=1,he_test=1,beta_sort_train=0.05,beta_sort_test=0,norm_type=norm_type,
-#                    date=date, GPUtype='l4')
-  
-#   # Gene-gene interaction terms
-#   generate_subFile(sim.dataType='nl-interaction',
-#                    he_train=1,he_test=1,beta_sort_train=0.05,beta_sort_test=0,norm_type=norm_type,
-#                    date=date, GPUtype='l4')
-  
-#   # Sine interaction
-#   generate_subFile(sim.dataType='nl-sine',
-#                    he_train=1,he_test=1,beta_sort_train=0.05,beta_sort_test=0,norm_type=norm_type,
-#                    date=date, GPUtype='l4')
-# }
+## ############################# BE11Asso10 ###############################
 
 
-
-
-# ## ############################# BE11Asso11 ###############################
-# date = "091725"
-
-# for (norm_type in 0:6) {
-
-#   # Linear risk with moderate effects
-#   generate_subFile(sim.dataType='linear-moderate',
-#                    he_train=1,he_test=1,beta_sort_train=0.05,beta_sort_test=0.05,norm_type=norm_type,
-#                    date=date, GPUtype='l4')
-
-#   # Linear risk with weak effects
-#   generate_subFile(sim.dataType='linear-weak',
-#                    he_train=1,he_test=1,beta_sort_train=0.05,beta_sort_test=0.05,norm_type=norm_type,
-#                    date=date, GPUtype='l4')
-
-#   # Squared terms
-#   generate_subFile(sim.dataType='nl-quadratic',
-#                    he_train=1,he_test=1,beta_sort_train=0.05,beta_sort_test=0.05,norm_type=norm_type,
-#                    date=date, GPUtype='l4')
-
-#   # Squared terms with intercept
-#   generate_subFile(sim.dataType='nl-shiftquad',
-#                    he_train=1,he_test=1,beta_sort_train=0.05,beta_sort_test=0.05,norm_type=norm_type,
-#                    date=date, GPUtype='l4')
-
-#   # Gene-gene interaction terms
-#   generate_subFile(sim.dataType='nl-interaction',
-#                    he_train=1,he_test=1,beta_sort_train=0.05,beta_sort_test=0.05,norm_type=norm_type,
-#                    date=date, GPUtype='l4')
-
-#   # Sine interaction
-#   generate_subFile(sim.dataType='nl-sine',
-#                    he_train=1,he_test=1,beta_sort_train=0.05,beta_sort_test=0.05,norm_type=norm_type,
-#                    date=date, GPUtype='l4')
-# }
-
+## ############################# BE11Asso11 ###############################

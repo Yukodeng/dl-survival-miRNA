@@ -87,7 +87,7 @@ def stratified_cox_ph_loss(log_h: Tensor, durations: Tensor, events: Tensor, bat
         
     if n_valid_batch == 0:
         return log_h.sum() * 0.0
-    # print(n_valid_batch)
+    
     return losses.sum()
 
 
